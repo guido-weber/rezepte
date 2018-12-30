@@ -2,3 +2,7 @@
 elm-stuff
 # elm-repl generated files
 repl-temp-*
+
+.DS_Store
+assets/main.js
+rezepte_server/rezepte_server
