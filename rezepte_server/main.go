@@ -2,24 +2,41 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/mux"
 )
 
-func spa(w http.ResponseWriter, r *http.Request) {
+func spaHandler(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "../assets/index.html")
 }
 
 func main() {
+	dsn := os.Getenv("REZEPTE_DSN")
+	if dsn == "" {
+		panic("Variable REZEPTE_DSN nicht gesetzt!")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		panic(err.Error())
+	}
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		panic(err.Error())
+	}
+
 	router := mux.NewRouter().StrictSlash(true)
 	router.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("../assets"))))
-	router.HandleFunc("/rezepte/{key}", spa)
-	router.HandleFunc("/", spa)
+	router.HandleFunc("/rezepte/{key}", spaHandler)
+	router.HandleFunc("/", spaHandler)
 
 	srv := &http.Server{
 		Handler:      router,
@@ -30,6 +47,7 @@ func main() {
 
 	// Run our server in a goroutine so that it doesn't block.
 	go func() {
+		log.Println("Starting Server ...")
 		if err := srv.ListenAndServe(); err != nil {
 			log.Println(err)
 		}
