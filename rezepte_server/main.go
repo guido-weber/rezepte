@@ -2,44 +2,26 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/gorilla/mux"
-)
+	"github.com/guido-weber/rezepte/rezepte_server/backend"
 
-func spaHandler(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "../assets/index.html")
-}
+	_ "github.com/go-sql-driver/mysql"
+)
 
 func main() {
 	dsn := os.Getenv("REZEPTE_DSN")
 	if dsn == "" {
 		panic("Variable REZEPTE_DSN nicht gesetzt!")
 	}
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		panic(err.Error())
-	}
-	defer db.Close()
-
-	err = db.Ping()
-	if err != nil {
-		panic(err.Error())
-	}
-
-	router := mux.NewRouter().StrictSlash(true)
-	router.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("../assets"))))
-	router.HandleFunc("/rezepte/{key}", spaHandler)
-	router.HandleFunc("/", spaHandler)
+	backend.InitDB("mysql", dsn)
 
 	srv := &http.Server{
-		Handler:      router,
+		Handler:      backend.NewRouter(),
 		Addr:         "127.0.0.1:8080",
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,
