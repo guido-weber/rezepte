@@ -3,8 +3,9 @@ import Browser.Navigation as Nav
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Http
-import Json.Decode exposing (Decoder, field, int, string, list, map3)
+import Json.Decode as JD
 import Url
+import Url.Parser as UP exposing ((</>))
 
 -- MAIN
 
@@ -19,34 +20,84 @@ main =
         , onUrlRequest = LinkClicked
         }
 
--- MODEL
+-- Routes
 
-type alias Receipe =
-    { id: Int
-    , name: String
-    , instructions: String
+type Route
+    = Home
+    | Detail Int
+    | Unknown String
+
+routeParser : UP.Parser (Route -> a) a
+routeParser =
+    UP.oneOf
+        [ UP.map Home    UP.top
+        , UP.map Detail  (UP.s "rezepte" </> UP.int)
+        ]
+
+routeFromUrl : Url.Url -> Route
+routeFromUrl url =
+    case UP.parse routeParser url of
+        Nothing ->
+            Unknown (Url.toString url)
+        Just route ->
+            route
+
+-- Rezepte
+
+type Status a = Initial | Loading | Success a | Failure
+
+type alias RezeptKopf =
+    { api_link : String
+    , ui_link : String
+    , rezept_id : Int
+    , bezeichnung : String
     }
 
-type alias ReceipeList = List Receipe
+type alias RezeptDetails =
+        { api_link : String
+        , ui_link : String
+        , rezept_id : Int
+        , bezeichnung : String
+        , anleitung : String
+        }
 
-type Receipes = Loading | Success ReceipeList | Failure
+-- Model
 
 type alias Model =
     { key : Nav.Key
-    , url : Url.Url
-    , receipes: Receipes
+    , current_route : Route
+    , rezeptListe : Status (List RezeptKopf)
+    , rezept : Status RezeptDetails
     }
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
-    ( Model key url Loading, getReceipeList )
+    changeUrl url (Model key Home Initial Initial)
 
 -- UPDATE
 
 type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
-    | GotReceipeList (Result Http.Error ReceipeList)
+    | GotRezeptListe (Result Http.Error (List RezeptKopf))
+    | GotRezeptDetails (Result Http.Error RezeptDetails)
+
+changeRoute : Route -> Model -> ( Model, Cmd Msg )
+changeRoute route model =
+    let
+        cmd = case route of
+            Home ->
+                getRezeptListe
+            Detail key ->
+                getRezeptDetails key
+            Unknown _ ->
+                Cmd.none
+    in
+        ( { model | current_route = route }, cmd )
+
+changeUrl : Url.Url -> Model -> ( Model, Cmd Msg )
+changeUrl url model =
+    changeRoute (routeFromUrl url) model
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -55,22 +106,25 @@ update msg model =
             case urlRequest of
                 Browser.Internal url ->
                     ( model, Nav.pushUrl model.key (Url.toString url) )
-
                 Browser.External href ->
                     ( model, Nav.load href )
 
         UrlChanged url ->
-            ( { model | url = url }
-            , Cmd.none
-            )
+            changeUrl url model
 
-        GotReceipeList result ->
+        GotRezeptListe result ->
             case result of
-                Ok receipes ->
-                    ({ model | receipes = Success receipes }, Cmd.none)
-
+                Ok rezeptListe ->
+                    ({ model | rezeptListe = Success rezeptListe }, Cmd.none)
                 Err _ ->
-                    ({ model | receipes = Failure }, Cmd.none)
+                    ({ model | rezeptListe = Failure }, Cmd.none)
+
+        GotRezeptDetails result ->
+            case result of
+                Ok rezept ->
+                    ({ model | rezept = Success rezept }, Cmd.none)
+                Err _ ->
+                    ({ model | rezept = Failure }, Cmd.none)
 
 -- SUBSCRIPTIONS
 
@@ -82,51 +136,94 @@ subscriptions _ =
 
 view : Model -> Browser.Document Msg
 view model =
-    { title = "URL Interceptor"
-    , body =
-        [ text "The current URL is: "
-        , b [] [ text (Url.toString model.url) ]
-        , viewReceipes model.receipes
-        ]
-    }
+    case model.current_route of
+        Home ->
+            { title = "Rezepte"
+            , body =
+                [ viewRezeptListe model.rezeptListe
+                ]
+            }
+        Detail key ->
+            { title = "Rezept " ++ (String.fromInt key)
+            , body =
+                [ viewRezeptDetails model.rezept
+                ]
+            }
+        Unknown msg ->
+            { title = "Fehler!"
+            , body =
+                [ text ("Hoppala: " ++ msg)
+                ]
+            }
 
-viewReceipe : Receipe -> Html msg
-viewReceipe receipe =
-    div [class "receipe"]
-        [ a [ href ("/rezepte/" ++ (String.fromInt receipe.id)) ] [ text receipe.name ]
-        , p [] [ text receipe.instructions ]
+viewRezeptElement : RezeptKopf -> Html msg
+viewRezeptElement rezept =
+    div [class "rezept-element"]
+        [ a [ href rezept.ui_link ] [ text rezept.bezeichnung ]
         ]
 
-viewReceipes : Receipes -> Html Msg
-viewReceipes receipes =
-    case receipes of
+viewRezeptListe : Status (List RezeptKopf) -> Html Msg
+viewRezeptListe rezeptListeStatus =
+    case rezeptListeStatus of
+        Initial ->
+            text "Initial"
         Loading ->
             text "Wait ..."
-
-        Success receipeList ->
-            div [class "receipe-list"]
-                (List.map viewReceipe receipeList)
-
+        Success rezeptListe ->
+            div [class "rezept-liste"]
+                (List.map viewRezeptElement rezeptListe)
         Failure ->
             text "Oops!"
 
+viewRezeptDetails : Status RezeptDetails -> Html Msg
+viewRezeptDetails rezeptDetailsStatus =
+    case rezeptDetailsStatus of
+        Initial ->
+            text "Initial"
+        Loading ->
+            text "Wait ..."
+        Success rezept ->
+            div [class "rezept-details"]
+                [ h3 [] [ text rezept.bezeichnung ]
+                , p [] [ text rezept.anleitung ]
+                , a [ href "/" ] [ text "Home" ]
+                ]
+        Failure ->
+            text "Oops!"
 
 -- HTTP
 
-getReceipeList : Cmd Msg
-getReceipeList =
+getRezeptListe : Cmd Msg
+getRezeptListe =
     Http.get
         { url = "/api/rezepte"
-        , expect = Http.expectJson GotReceipeList receipeListDecoder
+        , expect = Http.expectJson GotRezeptListe rezeptListeDecoder
         }
 
-receipeDecoder : Decoder Receipe
-receipeDecoder =
-    map3 Receipe
-        (field "RezeptID" int)
-        (field "Bezeichnung" string)
-        (field "Anleitung" string)
+rezeptKopfDecoder : JD.Decoder RezeptKopf
+rezeptKopfDecoder =
+    JD.map4 RezeptKopf
+        (JD.field "APILink" JD.string)
+        (JD.field "UILink" JD.string)
+        (JD.field "RezeptID" JD.int)
+        (JD.field "Bezeichnung" JD.string)
 
-receipeListDecoder : Decoder ReceipeList
-receipeListDecoder =
-    list receipeDecoder
+rezeptListeDecoder : JD.Decoder (List RezeptKopf)
+rezeptListeDecoder =
+    JD.list rezeptKopfDecoder
+
+getRezeptDetails : Int -> Cmd Msg
+getRezeptDetails key =
+    Http.get
+        { url = "/api/rezepte/" ++ (String.fromInt key)
+        , expect = Http.expectJson GotRezeptDetails rezeptDetailsDecoder
+        }
+
+rezeptDetailsDecoder : JD.Decoder RezeptDetails
+rezeptDetailsDecoder =
+    JD.map5 RezeptDetails
+        (JD.field "APILink" JD.string)
+        (JD.field "UILink" JD.string)
+        (JD.field "RezeptID" JD.int)
+        (JD.field "Bezeichnung" JD.string)
+        (JD.field "Anleitung" JD.string)
