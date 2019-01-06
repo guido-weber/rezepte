@@ -2,10 +2,12 @@ import Browser
 import Browser.Navigation as Nav
 import Html exposing (..)
 import Html.Attributes exposing (..)
+import Html.Events exposing (onClick, custom)
 import Http
 import Json.Decode as JD
 import Url
 import Url.Parser as UP exposing ((</>))
+import Attributes exposing (..)
 
 -- MAIN
 
@@ -66,13 +68,14 @@ type alias RezeptDetails =
 type alias Model =
     { key : Nav.Key
     , current_route : Route
+    , navbarBurgerExpanded : Bool
     , rezeptListe : Status (List RezeptKopf)
     , rezept : Status RezeptDetails
     }
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
-    changeUrl url (Model key Home Initial Initial)
+    changeUrl url (Model key Home False Initial Initial)
 
 -- UPDATE
 
@@ -81,6 +84,7 @@ type Msg
     | UrlChanged Url.Url
     | GotRezeptListe (Result Http.Error (List RezeptKopf))
     | GotRezeptDetails (Result Http.Error RezeptDetails)
+    | ToggleBurgerMenu
 
 changeRoute : Route -> Model -> ( Model, Cmd Msg )
 changeRoute route model =
@@ -126,6 +130,9 @@ update msg model =
                 Err _ ->
                     ({ model | rezept = Failure }, Cmd.none)
 
+        ToggleBurgerMenu ->
+            ({ model | navbarBurgerExpanded = not model.navbarBurgerExpanded }, Cmd.none)
+
 -- SUBSCRIPTIONS
 
 subscriptions : Model -> Sub Msg
@@ -140,26 +147,72 @@ view model =
         Home ->
             { title = "Rezepte"
             , body =
-                [ viewRezeptListe model.rezeptListe
+                [ viewNavbar model
+                , viewRezeptListe model.rezeptListe
                 ]
             }
         Detail key ->
             { title = "Rezept " ++ (String.fromInt key)
             , body =
-                [ viewRezeptDetails model.rezept
+                [ viewNavbar model
+                , viewRezeptDetails model.rezept
                 ]
             }
         Unknown msg ->
             { title = "Fehler!"
             , body =
-                [ text ("Hoppala: " ++ msg)
+                [ viewNavbar model
+                , text ("Hoppala: " ++ msg)
                 ]
             }
 
+onClickSimply : Msg -> Attribute Msg
+onClickSimply msg =
+    custom "click" (JD.map alwaysStopAndPreventDefault (JD.succeed msg))
+
+alwaysStopAndPreventDefault : Msg -> { message : Msg, stopPropagation : Bool, preventDefault : Bool }
+alwaysStopAndPreventDefault msg =
+      { message = msg, stopPropagation = True, preventDefault = True }
+
+viewNavbar : Model -> Html Msg
+viewNavbar model =
+    let
+        isActive = case model.navbarBurgerExpanded of
+            True -> " is-active"
+            False -> ""
+    in
+        nav [ class "navbar is-info", role "navigation", ariaLabel "main navigation"]
+            [ div [class "navbar-brand"]
+                  [ a [ href "/", class "navbar-item" ] [ text "Home" ]
+                  , a [ role "button"
+                      , class ("navbar-burger burger" ++ isActive)
+                      , ariaLabel "menu"
+                      , ariaExpanded "false"
+                      , href "#"
+                      , onClick ToggleBurgerMenu
+                      ]
+                      [ span [ ariaHidden "true" ] []
+                      , span [ ariaHidden "true" ] []
+                      , span [ ariaHidden "true" ] []
+                      ]
+                  ]
+            , div [ class ("navbar-menu" ++ isActive) ]
+                  [ div [ class "navbar-end" ]
+                        [ div [ class "navbar-item" ]
+                              [ div [ class "buttons" ]
+                                    [ button [ class "button" ] [ text "Neu" ]
+                                    ]
+                              ]
+                        ]
+                  ]
+            ]
+
 viewRezeptElement : RezeptKopf -> Html msg
 viewRezeptElement rezept =
-    div [class "rezept-element"]
-        [ a [ href rezept.ui_link ] [ text rezept.bezeichnung ]
+    div [ class "card rezept-element" ]
+        [ header [ class "card-header" ]
+            [ a [ href rezept.ui_link, class "card-header-title" ] [ text rezept.bezeichnung ] ]
+        , div [ class "card-content" ] []
         ]
 
 viewRezeptListe : Status (List RezeptKopf) -> Html Msg
@@ -170,8 +223,8 @@ viewRezeptListe rezeptListeStatus =
         Loading ->
             text "Wait ..."
         Success rezeptListe ->
-            div [class "rezept-liste"]
-                (List.map viewRezeptElement rezeptListe)
+            section [class "section"]
+                [ div [ class "container is-widescreen rezept-liste" ] (List.map viewRezeptElement rezeptListe) ]
         Failure ->
             text "Oops!"
 
@@ -183,10 +236,12 @@ viewRezeptDetails rezeptDetailsStatus =
         Loading ->
             text "Wait ..."
         Success rezept ->
-            div [class "rezept-details"]
-                [ h3 [] [ text rezept.bezeichnung ]
-                , p [] [ text rezept.anleitung ]
-                , a [ href "/" ] [ text "Home" ]
+            section [class "section"]
+                [ h1 [ class "title" ] [ text rezept.bezeichnung ]
+                , div [ class "container is-widescreen" ]
+                    [ div [ class "box" ]
+                        [ div [ class "content" ] [ text rezept.anleitung ] ]
+                    ]
                 ]
         Failure ->
             text "Oops!"
