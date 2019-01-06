@@ -231,7 +231,7 @@ viewRezeptTag tag =
 viewRezeptElement : RezeptKopf -> Html Msg
 viewRezeptElement rezept =
     div [ class "card rezept-element" ]
-        [ header [ class "card-header" ]
+        [ div [ class "card-header" ]
             [ a [ href rezept.ui_link, class "card-header-title has-text-link" ]
                 [ text rezept.bezeichnung ] ]
         , div [ class "card-content" ]
