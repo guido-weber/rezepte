@@ -1,21 +1,24 @@
 package backend
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 )
 
 // RezeptKopf represents the data sufficient for a list display
 type RezeptKopf struct {
-	APILink     string `JSON:"APILink"`
-	UILink      string `JSON:"UILink"`
-	RezeptID    int    `JSON:"RezeptID"`
-	Bezeichnung string `JSON:"Bezeichnung"`
+	APILink     string   `JSON:"APILink"`
+	UILink      string   `JSON:"UILink"`
+	RezeptID    int      `JSON:"RezeptID"`
+	Bezeichnung string   `JSON:"Bezeichnung"`
+	Tags        []string `JSON:"Tags"`
 }
 
 // RezeptDetails is the full data
@@ -62,8 +65,20 @@ func (rk *RezeptKopf) setLinks(router *mux.Router) error {
 	return nil
 }
 
+func parseTags(tagString sql.NullString) []string {
+	if tagString.Valid {
+		return strings.Split(tagString.String, ",")
+	}
+	return []string{}
+}
+
+const rezepteQuery = `SELECT r.rezept_id, bezeichnung, GROUP_CONCAT(rt.tag) tags
+	FROM tbl_rezepte r LEFT JOIN tbl_rezept_tags rt ON r.rezept_id = rt.rezept_id
+	GROUP BY r.rezept_id, bezeichnung
+	ORDER BY bezeichnung`
+
 func (hndlr RezepteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	rows, err := DB.Query("SELECT rezept_id, bezeichnung FROM tbl_rezepte ORDER BY bezeichnung")
+	rows, err := DB.Query(rezepteQuery)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -71,13 +86,15 @@ func (hndlr RezepteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rezepte := make([]RezeptKopf, 0)
 	for rows.Next() {
 		var rk RezeptKopf
-		if err := rows.Scan(&rk.RezeptID, &rk.Bezeichnung); err != nil {
+		var tags sql.NullString
+		if err := rows.Scan(&rk.RezeptID, &rk.Bezeichnung, &tags); err != nil {
 			log.Fatal(err)
 		}
 		err := rk.setLinks(hndlr.router)
 		if err != nil {
 			log.Fatal(err)
 		}
+		rk.Tags = parseTags(tags)
 		rezepte = append(rezepte, rk)
 	}
 	if err := rows.Err(); err != nil {
@@ -87,18 +104,25 @@ func (hndlr RezepteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rezepte)
 }
 
+const rezeptDetailsQuery = `SELECT r.rezept_id, bezeichnung, anleitung, GROUP_CONCAT(rt.tag) tags
+	FROM tbl_rezepte r LEFT JOIN tbl_rezept_tags rt ON r.rezept_id = rt.rezept_id
+	WHERE r.rezept_id = ?
+	GROUP BY r.rezept_id, bezeichnung`
+
 func (hndlr RezeptDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	key := vars["key"]
-	row := DB.QueryRow("SELECT rezept_id, bezeichnung, anleitung FROM tbl_rezepte where rezept_id = ?", key)
+	row := DB.QueryRow(rezeptDetailsQuery, key)
 	var rd RezeptDetails
-	if err := row.Scan(&rd.RezeptID, &rd.Bezeichnung, &rd.Anleitung); err != nil {
+	var tags sql.NullString
+	if err := row.Scan(&rd.RezeptID, &rd.Bezeichnung, &rd.Anleitung, &tags); err != nil {
 		log.Fatal(err)
 	}
 	err := rd.setLinks(hndlr.router)
 	if err != nil {
 		log.Fatal(err)
 	}
+	rd.Tags = parseTags(tags)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rd)
 }

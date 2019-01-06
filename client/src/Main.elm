@@ -53,15 +53,17 @@ type alias RezeptKopf =
     , ui_link : String
     , rezept_id : Int
     , bezeichnung : String
+    , tags : List String
     }
 
 type alias RezeptDetails =
-        { api_link : String
-        , ui_link : String
-        , rezept_id : Int
-        , bezeichnung : String
-        , anleitung : String
-        }
+    { api_link : String
+    , ui_link : String
+    , rezept_id : Int
+    , bezeichnung : String
+    , anleitung : String
+    , tags : List String
+    }
 
 -- Model
 
@@ -181,7 +183,7 @@ viewNavbar model =
             True -> " is-active"
             False -> ""
     in
-        nav [ class "navbar is-info", role "navigation", ariaLabel "main navigation"]
+        nav [ class "navbar is-fixed-top is-info", role "navigation", ariaLabel "main navigation"]
             [ div [class "navbar-brand"]
                   [ a [ href "/", class "navbar-item" ] [ text "Home" ]
                   , a [ role "button"
@@ -207,12 +209,18 @@ viewNavbar model =
                   ]
             ]
 
-viewRezeptElement : RezeptKopf -> Html msg
+viewRezeptTag : String -> Html Msg
+viewRezeptTag tag =
+    span [ class "tag is-primary" ] [ text tag ]
+
+viewRezeptElement : RezeptKopf -> Html Msg
 viewRezeptElement rezept =
     div [ class "card rezept-element" ]
         [ header [ class "card-header" ]
-            [ a [ href rezept.ui_link, class "card-header-title" ] [ text rezept.bezeichnung ] ]
-        , div [ class "card-content" ] []
+            [ a [ href rezept.ui_link, class "card-header-title has-text-link" ]
+                [ text rezept.bezeichnung ] ]
+        , div [ class "card-content" ]
+            [ div [ class "tags" ] (List.map viewRezeptTag rezept.tags) ]
         ]
 
 viewRezeptListe : Status (List RezeptKopf) -> Html Msg
@@ -224,7 +232,8 @@ viewRezeptListe rezeptListeStatus =
             text "Wait ..."
         Success rezeptListe ->
             section [class "section"]
-                [ div [ class "container is-widescreen rezept-liste" ] (List.map viewRezeptElement rezeptListe) ]
+                [ div [ class "container is-widescreen rezept-liste" ]
+                    (List.map viewRezeptElement rezeptListe) ]
         Failure ->
             text "Oops!"
 
@@ -238,6 +247,7 @@ viewRezeptDetails rezeptDetailsStatus =
         Success rezept ->
             section [class "section"]
                 [ h1 [ class "title" ] [ text rezept.bezeichnung ]
+                , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
                 , div [ class "container is-widescreen" ]
                     [ div [ class "box" ]
                         [ div [ class "content" ] [ text rezept.anleitung ] ]
@@ -257,11 +267,12 @@ getRezeptListe =
 
 rezeptKopfDecoder : JD.Decoder RezeptKopf
 rezeptKopfDecoder =
-    JD.map4 RezeptKopf
+    JD.map5 RezeptKopf
         (JD.field "APILink" JD.string)
         (JD.field "UILink" JD.string)
         (JD.field "RezeptID" JD.int)
         (JD.field "Bezeichnung" JD.string)
+        (JD.field "Tags" (JD.list JD.string))
 
 rezeptListeDecoder : JD.Decoder (List RezeptKopf)
 rezeptListeDecoder =
@@ -276,9 +287,10 @@ getRezeptDetails key =
 
 rezeptDetailsDecoder : JD.Decoder RezeptDetails
 rezeptDetailsDecoder =
-    JD.map5 RezeptDetails
+    JD.map6 RezeptDetails
         (JD.field "APILink" JD.string)
         (JD.field "UILink" JD.string)
         (JD.field "RezeptID" JD.int)
         (JD.field "Bezeichnung" JD.string)
         (JD.field "Anleitung" JD.string)
+        (JD.field "Tags" (JD.list JD.string))
