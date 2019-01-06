@@ -56,6 +56,20 @@ type alias RezeptKopf =
     , tags : List String
     }
 
+type alias RezeptZutat =
+    { rezept_zutat_id : Int
+    , zutat : String
+    , menge : Float
+    , mengeneinheit : String
+    , bemerkung : String
+    }
+
+type alias RezeptTeil =
+    { rezept_teil_id : Int
+    , bezeichnung : String
+    , zutaten : List RezeptZutat
+    }
+
 type alias RezeptDetails =
     { api_link : String
     , ui_link : String
@@ -63,6 +77,7 @@ type alias RezeptDetails =
     , bezeichnung : String
     , anleitung : String
     , tags : List String
+    , rezept_teile : List RezeptTeil
     }
 
 -- Model
@@ -237,6 +252,23 @@ viewRezeptListe rezeptListeStatus =
         Failure ->
             text "Oops!"
 
+viewRezeptZutat : RezeptZutat -> Html Msg
+viewRezeptZutat zutat =
+    li []
+        [ text (String.fromFloat zutat.menge)
+        , text " "
+        , text zutat.mengeneinheit
+        , text " "
+        , text zutat.zutat
+        ]
+
+viewRezeptTeil : RezeptTeil -> Html Msg
+viewRezeptTeil teil =
+    div [ class "box content" ]
+        [ h4 [ class "title is-4" ] [ text teil.bezeichnung ]
+        , ul [] (List.map viewRezeptZutat teil.zutaten)
+        ]
+
 viewRezeptDetails : Status RezeptDetails -> Html Msg
 viewRezeptDetails rezeptDetailsStatus =
     case rezeptDetailsStatus of
@@ -248,8 +280,10 @@ viewRezeptDetails rezeptDetailsStatus =
             section [class "section"]
                 [ h1 [ class "title" ] [ text rezept.bezeichnung ]
                 , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
-                , div [ class "container is-widescreen" ]
-                    [ div [ class "box" ]
+                , div [ class "columns" ]
+                    [ div [ class "column" ]
+                        (List.map viewRezeptTeil rezept.rezept_teile)
+                    , div [ class "column is-two-thirds" ]
                         [ div [ class "content" ] [ text rezept.anleitung ] ]
                     ]
                 ]
@@ -285,12 +319,29 @@ getRezeptDetails key =
         , expect = Http.expectJson GotRezeptDetails rezeptDetailsDecoder
         }
 
+rezeptZutatDecoder : JD.Decoder RezeptZutat
+rezeptZutatDecoder =
+    JD.map5 RezeptZutat
+        (JD.field "RezeptZutatID" JD.int)
+        (JD.field "Zutat" JD.string)
+        (JD.field "Menge" JD.float)
+        (JD.field "Mengeneinheit" JD.string)
+        (JD.field "Bemerkung" JD.string)
+
+rezeptTeilDecoder : JD.Decoder RezeptTeil
+rezeptTeilDecoder =
+    JD.map3 RezeptTeil
+        (JD.field "RezeptTeilID" JD.int)
+        (JD.field "Bezeichnung" JD.string)
+        (JD.field "Zutaten" (JD.list rezeptZutatDecoder))
+
 rezeptDetailsDecoder : JD.Decoder RezeptDetails
 rezeptDetailsDecoder =
-    JD.map6 RezeptDetails
+    JD.map7 RezeptDetails
         (JD.field "APILink" JD.string)
         (JD.field "UILink" JD.string)
         (JD.field "RezeptID" JD.int)
         (JD.field "Bezeichnung" JD.string)
         (JD.field "Anleitung" JD.string)
         (JD.field "Tags" (JD.list JD.string))
+        (JD.field "RezeptTeile" (JD.list rezeptTeilDecoder))
