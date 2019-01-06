@@ -210,7 +210,8 @@ viewNavbar model =
 viewRezeptElement : RezeptKopf -> Html msg
 viewRezeptElement rezept =
     div [ class "card rezept-element" ]
-        [ header [ class "card-header" ] [ a [ href rezept.ui_link, class "card-header-title" ] [ text rezept.bezeichnung ] ]
+        [ header [ class "card-header" ]
+            [ a [ href rezept.ui_link, class "card-header-title" ] [ text rezept.bezeichnung ] ]
         , div [ class "card-content" ] []
         ]
 
@@ -236,11 +237,10 @@ viewRezeptDetails rezeptDetailsStatus =
             text "Wait ..."
         Success rezept ->
             section [class "section"]
-                [ div [ class "container is-widescreen" ]
-                    [ div [ class "card" ]
-                        [ header [ class "card-header" ] [ p [ class "card-header-title" ] [ text rezept.bezeichnung ] ]
-                        , div [ class "card-content" ] [ div [ class "content" ] [ text rezept.anleitung ] ]
-                        ]
+                [ h1 [ class "title" ] [ text rezept.bezeichnung ]
+                , div [ class "container is-widescreen" ]
+                    [ div [ class "box" ]
+                        [ div [ class "content" ] [ text rezept.anleitung ] ]
                     ]
                 ]
         Failure ->
