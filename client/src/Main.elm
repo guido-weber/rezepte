@@ -2,9 +2,10 @@ import Browser
 import Browser.Navigation as Nav
 import Html exposing (..)
 import Html.Attributes exposing (..)
-import Html.Events exposing (onClick, custom)
+import Html.Events exposing (onClick, onInput, custom)
 import Http
 import Json.Decode as JD
+import Json.Encode as JE
 import Url
 import Url.Parser as UP exposing ((</>))
 import Attributes exposing (..)
@@ -27,6 +28,7 @@ main =
 type Route
     = Home
     | Detail Int
+    | AddNew
     | Unknown String
 
 routeParser : UP.Parser (Route -> a) a
@@ -34,6 +36,7 @@ routeParser =
     UP.oneOf
         [ UP.map Home    UP.top
         , UP.map Detail  (UP.s "rezepte" </> UP.int)
+        , UP.map AddNew  (UP.s "rezepte" </> UP.s "neu")
         ]
 
 routeFromUrl : Url.Url -> Route
@@ -88,11 +91,12 @@ type alias Model =
     , navbarBurgerExpanded : Bool
     , rezeptListe : Status (List RezeptKopf)
     , rezept : Status RezeptDetails
+    , rezeptNeu : RezeptDetails
     }
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
-    changeUrl url (Model key Home False Initial Initial)
+    changeUrl url (Model key Home False Initial Initial (RezeptDetails "" "" -1 "" "" [] []))
 
 -- UPDATE
 
@@ -102,23 +106,48 @@ type Msg
     | GotRezeptListe (Result Http.Error (List RezeptKopf))
     | GotRezeptDetails (Result Http.Error RezeptDetails)
     | ToggleBurgerMenu
+    | InputBezeichnung String
+    | InputAnleitung String
+    | SubmitRezeptNeu RezeptDetails
+    | SubmitRezeptNeuDone (Result Http.Error String)
+    | CancelRezeptNeu
 
 changeRoute : Route -> Model -> ( Model, Cmd Msg )
 changeRoute route model =
     let
-        cmd = case route of
-            Home ->
-                getRezeptListe
-            Detail key ->
-                getRezeptDetails key
-            Unknown _ ->
-                Cmd.none
+        new_model = { model | current_route = route, navbarBurgerExpanded = False }
     in
-        ( { model | current_route = route }, cmd )
+        case route of
+            Home ->
+                (new_model, getRezeptListe)
+            Detail key ->
+                (new_model, getRezeptDetails key)
+            AddNew ->
+                ({ new_model | rezeptNeu = (RezeptDetails "" "" -1 "" "" [] []) }, Cmd.none)
+            Unknown _ ->
+                (new_model, Cmd.none)
 
 changeUrl : Url.Url -> Model -> ( Model, Cmd Msg )
 changeUrl url model =
     changeRoute (routeFromUrl url) model
+
+submitRezeptNeu : RezeptDetails -> Model -> ( Model, Cmd Msg )
+submitRezeptNeu rd model =
+    let
+        json = JE.object
+            [ ( "Bezeichnung", JE.string rd.bezeichnung )
+            , ( "Anleitung", JE.string rd.anleitung )
+            ]
+    in
+        ( model, Http.request
+            { method = "POST"
+            , headers = []
+            , url = "/api/rezepte"
+            , body = Http.jsonBody json
+            , expect = Http.expectJson SubmitRezeptNeuDone JD.string
+            , timeout = Nothing
+            , tracker = Nothing
+        } )
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -150,6 +179,31 @@ update msg model =
         ToggleBurgerMenu ->
             ({ model | navbarBurgerExpanded = not model.navbarBurgerExpanded }, Cmd.none)
 
+        InputBezeichnung s ->
+            let
+                rn = model.rezeptNeu
+            in
+                ( { model | rezeptNeu = { rn | bezeichnung = s } }, Cmd.none)
+
+        InputAnleitung s ->
+            let
+                rn = model.rezeptNeu
+            in
+                ( { model | rezeptNeu = { rn | anleitung = s } }, Cmd.none)
+
+        SubmitRezeptNeu rd ->
+            submitRezeptNeu rd model
+
+        SubmitRezeptNeuDone result ->
+            case result of
+                Ok url ->
+                    (model, Nav.pushUrl model.key url)
+                Err _ ->
+                    (model, Cmd.none)
+
+        CancelRezeptNeu ->
+            (model, Nav.back model.key 1)
+
 -- SUBSCRIPTIONS
 
 subscriptions : Model -> Sub Msg
@@ -173,6 +227,13 @@ view model =
             , body =
                 [ viewNavbar model
                 , viewRezeptDetails model.rezept
+                ]
+            }
+        AddNew ->
+            { title = "Neu"
+            , body =
+                [ viewNavbar model
+                , viewRezeptNeu model.rezeptNeu
                 ]
             }
         Unknown msg ->
@@ -217,7 +278,7 @@ viewNavbar model =
                   [ div [ class "navbar-end" ]
                         [ div [ class "navbar-item" ]
                               [ div [ class "buttons" ]
-                                    [ button [ class "button" ] [ text "Neu" ]
+                                    [ a [ href "/rezepte/neu", class "button" ] [ text "Neu" ]
                                     ]
                               ]
                         ]
@@ -277,7 +338,7 @@ viewRezeptDetails rezeptDetailsStatus =
         Loading ->
             text "Wait ..."
         Success rezept ->
-            section [class "section"]
+            section [ class "section" ]
                 [ h1 [ class "title" ] [ text rezept.bezeichnung ]
                 , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
                 , div [ class "columns" ]
@@ -289,6 +350,47 @@ viewRezeptDetails rezeptDetailsStatus =
                 ]
         Failure ->
             text "Oops!"
+
+viewRezeptNeu : RezeptDetails -> Html Msg
+viewRezeptNeu rd =
+    Html.form [ class "section" ]
+        [ div [ class "field" ]
+            [ label [ class "label", for "bezeichnung" ] [ text "Bezeichnung" ]
+            , div [ class "control" ]
+                [ input
+                    [ id "bezeichnung"
+                    , class "input"
+                    , type_ "text"
+                    , value rd.bezeichnung
+                    , placeholder "Rezeptbezeichnung"
+                    , onInput InputBezeichnung
+                    ]
+                    []
+                ]
+            ]
+        , div [ class "field" ]
+            [ label [ class "label", for "anleitung" ] [ text "Anleitung" ]
+            , div [ class "control" ]
+                [ textarea
+                    [ id "anleitung"
+                    , class "textarea"
+                    , value rd.anleitung
+                    , placeholder "Anleitung"
+                    , attribute "rows" "5"
+                    , onInput InputAnleitung
+                    ]
+                    []
+                ]
+            ]
+        , div [ class "field is-grouped" ]
+            [ div [ class "control" ]
+                [ button [ class "button is-primary", type_ "button", onClick (SubmitRezeptNeu rd) ]
+                    [ text "Speichern" ] ]
+            , div [ class "control" ]
+                [ button [ class "button is-danger", type_ "button", onClick CancelRezeptNeu ]
+                    [ text "Abbrechen" ] ]
+            ]
+        ]
 
 -- HTTP
 
