@@ -197,7 +197,7 @@ update msg model =
         SubmitRezeptNeuDone result ->
             case result of
                 Ok url ->
-                    (model, Nav.pushUrl model.key url)
+                    (model, Nav.replaceUrl model.key url)
                 Err _ ->
                     (model, Cmd.none)
 
