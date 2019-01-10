@@ -23,33 +23,7 @@ main =
         , onUrlRequest = LinkClicked
         }
 
--- Routes
-
-type Route
-    = Home
-    | Detail Int
-    | AddNew
-    | Unknown String
-
-routeParser : UP.Parser (Route -> a) a
-routeParser =
-    UP.oneOf
-        [ UP.map Home    UP.top
-        , UP.map Detail  (UP.s "rezepte" </> UP.int)
-        , UP.map AddNew  (UP.s "rezepte" </> UP.s "neu")
-        ]
-
-routeFromUrl : Url.Url -> Route
-routeFromUrl url =
-    case UP.parse routeParser url of
-        Nothing ->
-            Unknown (Url.toString url)
-        Just route ->
-            route
-
 -- Rezepte
-
-type Status a = Initial | Loading | Success a | Failure
 
 type alias RezeptKopf =
     { api_link : String
@@ -83,20 +57,78 @@ type alias RezeptDetails =
     , rezept_teile : List RezeptTeil
     }
 
+neueRezeptDetails : RezeptDetails
+neueRezeptDetails =
+    RezeptDetails "" "" -1 "" "" [] [(RezeptTeil -1 "Zutaten" [])]
+
+-- Routes & URLs
+
+routeParser : UP.Parser (Route -> a) a
+routeParser =
+    UP.oneOf
+        [ UP.map (Liste ListLoading) UP.top
+        , UP.map (\i -> Detail (DetailLoading i)) (UP.s "rezepte" </> UP.int)
+        , UP.map (AddNew (AddNewEntering neueRezeptDetails)) (UP.s "rezepte" </> UP.s "neu")
+        ]
+
+routeFromUrl : Url.Url -> Route
+routeFromUrl url =
+    case UP.parse routeParser url of
+        Nothing ->
+            Unknown (Url.toString url)
+        Just route ->
+            route
+
+changeRoute : Route -> Model -> ( Model, Cmd Msg )
+changeRoute route model =
+    let
+        new_model = { model | currentRoute = route, navbarBurgerExpanded = False }
+    in
+        case route of
+            Liste _ ->
+                (new_model, getRezeptListe)
+            Detail (DetailLoading key) ->
+                (new_model, getRezeptDetails key)
+            _ ->
+                (new_model, Cmd.none)
+
+changeUrl : Url.Url -> Model -> ( Model, Cmd Msg )
+changeUrl url model =
+    changeRoute (routeFromUrl url) model
+
 -- Model
+
+type ListRoute
+    = ListLoading
+    | ListLoaded (List RezeptKopf)
+    | ListError String
+
+type DetailRoute
+    = DetailLoading Int
+    | DetailOK RezeptDetails
+    | DetailError String
+
+type AddNewRoute
+    = AddNewEntering RezeptDetails
+    | AddNewSubmitted RezeptDetails
+    | AddNewError RezeptDetails String
+
+type Route
+    = Initial
+    | Liste ListRoute
+    | Detail DetailRoute
+    | AddNew AddNewRoute
+    | Unknown String
 
 type alias Model =
     { key : Nav.Key
-    , current_route : Route
     , navbarBurgerExpanded : Bool
-    , rezeptListe : Status (List RezeptKopf)
-    , rezept : Status RezeptDetails
-    , rezeptNeu : RezeptDetails
+    , currentRoute : Route
     }
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
-    changeUrl url (Model key Home False Initial Initial (RezeptDetails "" "" -1 "" "" [] []))
+    changeUrl url (Model key False Initial)
 
 -- UPDATE
 
@@ -112,25 +144,6 @@ type Msg
     | SubmitRezeptNeuDone (Result Http.Error String)
     | CancelRezeptNeu
 
-changeRoute : Route -> Model -> ( Model, Cmd Msg )
-changeRoute route model =
-    let
-        new_model = { model | current_route = route, navbarBurgerExpanded = False }
-    in
-        case route of
-            Home ->
-                (new_model, getRezeptListe)
-            Detail key ->
-                (new_model, getRezeptDetails key)
-            AddNew ->
-                ({ new_model | rezeptNeu = (RezeptDetails "" "" -1 "" "" [] []) }, Cmd.none)
-            Unknown _ ->
-                (new_model, Cmd.none)
-
-changeUrl : Url.Url -> Model -> ( Model, Cmd Msg )
-changeUrl url model =
-    changeRoute (routeFromUrl url) model
-
 submitRezeptNeu : RezeptDetails -> Model -> ( Model, Cmd Msg )
 submitRezeptNeu rd model =
     let
@@ -139,7 +152,8 @@ submitRezeptNeu rd model =
             , ( "Anleitung", JE.string rd.anleitung )
             ]
     in
-        ( model, Http.request
+        ( {model | currentRoute = AddNew (AddNewSubmitted rd)}
+        , Http.request
             { method = "POST"
             , headers = []
             , url = "/api/rezepte"
@@ -148,6 +162,15 @@ submitRezeptNeu rd model =
             , timeout = Nothing
             , tracker = Nothing
         } )
+
+formatError : Http.Error -> String
+formatError error =
+    case error of
+        Http.BadUrl s -> "Bad URL: " ++ s
+        Http.Timeout -> "Timeout"
+        Http.NetworkError -> "Network Error"
+        Http.BadStatus status -> "Bad Status: " ++ (String.fromInt status)
+        Http.BadBody s -> "Bad Body: " ++ s
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -165,31 +188,33 @@ update msg model =
         GotRezeptListe result ->
             case result of
                 Ok rezeptListe ->
-                    ({ model | rezeptListe = Success rezeptListe }, Cmd.none)
-                Err _ ->
-                    ({ model | rezeptListe = Failure }, Cmd.none)
+                    ({ model | currentRoute = Liste (ListLoaded rezeptListe) }, Cmd.none)
+                Err s ->
+                    ({ model | currentRoute = Liste (ListError (formatError s)) }, Cmd.none)
 
         GotRezeptDetails result ->
             case result of
                 Ok rezept ->
-                    ({ model | rezept = Success rezept }, Cmd.none)
-                Err _ ->
-                    ({ model | rezept = Failure }, Cmd.none)
+                    ({ model | currentRoute = Detail (DetailOK rezept) }, Cmd.none)
+                Err s ->
+                    ({ model | currentRoute = Detail (DetailError (formatError s)) }, Cmd.none)
 
         ToggleBurgerMenu ->
             ({ model | navbarBurgerExpanded = not model.navbarBurgerExpanded }, Cmd.none)
 
         InputBezeichnung s ->
-            let
-                rn = model.rezeptNeu
-            in
-                ( { model | rezeptNeu = { rn | bezeichnung = s } }, Cmd.none)
+            case model.currentRoute of
+                AddNew (AddNewEntering details) ->
+                    ( { model | currentRoute = AddNew (AddNewEntering {details | bezeichnung = s}) }, Cmd.none)
+                _ ->
+                    (model, Cmd.none)
 
         InputAnleitung s ->
-            let
-                rn = model.rezeptNeu
-            in
-                ( { model | rezeptNeu = { rn | anleitung = s } }, Cmd.none)
+            case model.currentRoute of
+                AddNew (AddNewEntering details) ->
+                    ( { model | currentRoute = AddNew (AddNewEntering {details | anleitung = s}) }, Cmd.none)
+                _ ->
+                    (model, Cmd.none)
 
         SubmitRezeptNeu rd ->
             submitRezeptNeu rd model
@@ -214,26 +239,46 @@ subscriptions _ =
 
 view : Model -> Browser.Document Msg
 view model =
-    case model.current_route of
-        Home ->
+    case model.currentRoute of
+        Initial ->
             { title = "Rezepte"
             , body =
                 [ viewNavbar model
-                , viewRezeptListe model.rezeptListe
                 ]
             }
-        Detail key ->
-            { title = "Rezept " ++ (String.fromInt key)
+        Liste listRoute ->
+            { title = "Rezepte"
             , body =
                 [ viewNavbar model
-                , viewRezeptDetails model.rezept
+                , viewRezeptListe listRoute
                 ]
             }
-        AddNew ->
+        Detail (DetailLoading i) ->
+            { title = "Lade Rezept " ++ (String.fromInt i)
+            , body =
+                [ viewNavbar model
+                , text "Wait ..."
+                ]
+            }
+        Detail (DetailOK rezeptDetails) ->
+            { title = rezeptDetails.bezeichnung
+            , body =
+                [ viewNavbar model
+                , viewRezeptDetails rezeptDetails
+                ]
+            }
+        Detail (DetailError msg) ->
+            { title = "Fehler!"
+            , body =
+                [ viewNavbar model
+                , text msg
+                ]
+            }
+        AddNew addNewRoute ->
             { title = "Neu"
             , body =
                 [ viewNavbar model
-                , viewRezeptNeu model.rezeptNeu
+                , viewRezeptNeu addNewRoute
                 ]
             }
         Unknown msg ->
@@ -258,6 +303,9 @@ viewNavbar model =
         isActive = case model.navbarBurgerExpanded of
             True -> " is-active"
             False -> ""
+        showNewButton = case model.currentRoute of
+            AddNew _ -> False
+            _ -> True
     in
         nav [ class "navbar is-fixed-top is-info", role "navigation", ariaLabel "main navigation"]
             [ div [class "navbar-brand"]
@@ -277,10 +325,13 @@ viewNavbar model =
             , div [ class ("navbar-menu" ++ isActive) ]
                   [ div [ class "navbar-end" ]
                         [ div [ class "navbar-item" ]
-                              [ div [ class "buttons" ]
+                            (if showNewButton then
+                                [ div [ class "buttons" ]
                                     [ a [ href "/rezepte/neu", class "button" ] [ text "Neu" ]
                                     ]
-                              ]
+                                ]
+                            else
+                                [])
                         ]
                   ]
             ]
@@ -299,19 +350,17 @@ viewRezeptElement rezept =
             [ div [ class "tags" ] (List.map viewRezeptTag rezept.tags) ]
         ]
 
-viewRezeptListe : Status (List RezeptKopf) -> Html Msg
-viewRezeptListe rezeptListeStatus =
-    case rezeptListeStatus of
-        Initial ->
-            text "Initial"
-        Loading ->
+viewRezeptListe : ListRoute -> Html Msg
+viewRezeptListe listeRoute =
+    case listeRoute of
+        ListLoading ->
             text "Wait ..."
-        Success rezeptListe ->
+        ListLoaded rezeptListe ->
             section [class "section"]
                 [ div [ class "container is-widescreen rezept-liste" ]
                     (List.map viewRezeptElement rezeptListe) ]
-        Failure ->
-            text "Oops!"
+        ListError msg ->
+            text ("Oops: " ++ msg)
 
 viewRezeptZutat : RezeptZutat -> Html Msg
 viewRezeptZutat zutat =
@@ -330,29 +379,31 @@ viewRezeptTeil teil =
         , ul [] (List.map viewRezeptZutat teil.zutaten)
         ]
 
-viewRezeptDetails : Status RezeptDetails -> Html Msg
-viewRezeptDetails rezeptDetailsStatus =
-    case rezeptDetailsStatus of
-        Initial ->
-            text "Initial"
-        Loading ->
-            text "Wait ..."
-        Success rezept ->
-            section [ class "section" ]
-                [ h1 [ class "title" ] [ text rezept.bezeichnung ]
-                , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
-                , div [ class "columns" ]
-                    [ div [ class "column" ]
-                        (List.map viewRezeptTeil rezept.rezept_teile)
-                    , div [ class "column is-two-thirds" ]
-                        [ div [ class "content" ] [ text rezept.anleitung ] ]
-                    ]
-                ]
-        Failure ->
-            text "Oops!"
+viewRezeptDetails : RezeptDetails -> Html Msg
+viewRezeptDetails rezept =
+    section [ class "section" ]
+        [ h1 [ class "title" ] [ text rezept.bezeichnung ]
+        , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
+        , div [ class "columns" ]
+            [ div [ class "column" ]
+                (List.map viewRezeptTeil rezept.rezept_teile)
+            , div [ class "column is-two-thirds" ]
+                [ div [ class "content" ] [ text rezept.anleitung ] ]
+            ]
+        ]
 
-viewRezeptNeu : RezeptDetails -> Html Msg
-viewRezeptNeu rd =
+viewRezeptNeu : AddNewRoute -> Html Msg
+viewRezeptNeu addNewRoute =
+    case addNewRoute of
+        AddNewEntering rd ->
+            viewRezeptForm rd
+        AddNewSubmitted rd ->
+            viewRezeptForm rd
+        AddNewError rd _ ->
+            viewRezeptForm rd
+
+viewRezeptForm : RezeptDetails -> Html Msg
+viewRezeptForm rd =
     Html.form [ class "section" ]
         [ div [ class "field" ]
             [ label [ class "label", for "bezeichnung" ] [ text "Bezeichnung" ]
