@@ -57,9 +57,13 @@ type alias RezeptDetails =
     , rezept_teile : List RezeptTeil
     }
 
+neuerRezeptTeil : RezeptTeil
+neuerRezeptTeil =
+    (RezeptTeil -1 "Zutaten" [ (RezeptZutat -1 "" 0 "" "") ])
+
 neueRezeptDetails : RezeptDetails
 neueRezeptDetails =
-    RezeptDetails "" "" -1 "" "" [] [(RezeptTeil -1 "Zutaten" [])]
+    RezeptDetails "" "" -1 "" "" [] [ neuerRezeptTeil ]
 
 -- Routes & URLs
 
@@ -140,9 +144,74 @@ type Msg
     | ToggleBurgerMenu
     | InputBezeichnung String
     | InputAnleitung String
+    | AddRezeptTeil
+    | InputTeilBezeichnung Int String
+    | InputZutat Int Int String
+    | InputMengeneinheit Int Int String
+    | InputMenge Int Int String
     | SubmitRezeptNeu RezeptDetails
-    | SubmitRezeptNeuDone (Result Http.Error String)
+    | SubmitRezeptNeuDone RezeptDetails (Result Http.Error String)
     | CancelRezeptNeu
+
+addRezeptTeil : Model -> ( Model, Cmd Msg )
+addRezeptTeil model =
+    case model.currentRoute of
+        AddNew (AddNewEntering details) ->
+            let
+                neu = (List.append details.rezept_teile [ neuerRezeptTeil ])
+            in
+                ( { model | currentRoute = AddNew (AddNewEntering {details | rezept_teile = neu}) }
+                , Cmd.none
+                )
+        _ ->
+            (model, Cmd.none)
+
+replaceTeil : RezeptDetails -> Int -> (RezeptTeil -> RezeptTeil) -> RezeptDetails
+replaceTeil details idx fct =
+    let
+        neu = (List.indexedMap
+                (\n -> \t -> if n == idx then (fct t) else t)
+                details.rezept_teile)
+    in
+        {details | rezept_teile = neu}
+
+inputTeilBezeichnung : Model -> Int -> String -> ( Model, Cmd Msg )
+inputTeilBezeichnung model teilIdx s =
+    case model.currentRoute of
+        AddNew (AddNewEntering details) ->
+            let
+                neu = replaceTeil details teilIdx (\t -> { t | bezeichnung = s })
+            in
+                ( { model | currentRoute = AddNew (AddNewEntering neu) }
+                , Cmd.none
+                )
+        _ ->
+            (model, Cmd.none)
+
+replaceZutat : RezeptTeil -> Int -> (RezeptZutat -> RezeptZutat) -> RezeptTeil
+replaceZutat teil idx fct =
+    let
+        replaced = (List.indexedMap
+                (\n -> \z -> if n == idx then (fct z) else z)
+                teil.zutaten)
+        neu = if (List.length teil.zutaten) == (idx + 1)
+            then (List.append replaced [ (RezeptZutat -1 "" 0 "" "") ])
+            else replaced
+    in
+        {teil | zutaten = neu}
+
+inputZutat : Model -> Int -> Int -> (RezeptZutat -> RezeptZutat) -> ( Model, Cmd Msg )
+inputZutat model teilIdx zutatIdx fct =
+    case model.currentRoute of
+        AddNew (AddNewEntering details) ->
+            let
+                neu = replaceTeil details teilIdx (\t -> replaceZutat t zutatIdx fct)
+            in
+                ( { model | currentRoute = AddNew (AddNewEntering neu) }
+                , Cmd.none
+                )
+        _ ->
+            (model, Cmd.none)
 
 submitRezeptNeu : RezeptDetails -> Model -> ( Model, Cmd Msg )
 submitRezeptNeu rd model =
@@ -158,7 +227,7 @@ submitRezeptNeu rd model =
             , headers = []
             , url = "/api/rezepte"
             , body = Http.jsonBody json
-            , expect = Http.expectJson SubmitRezeptNeuDone JD.string
+            , expect = Http.expectJson (SubmitRezeptNeuDone rd) JD.string
             , timeout = Nothing
             , tracker = Nothing
         } )
@@ -216,15 +285,34 @@ update msg model =
                 _ ->
                     (model, Cmd.none)
 
+        AddRezeptTeil ->
+            addRezeptTeil model
+
+        InputTeilBezeichnung teilIdx s ->
+            inputTeilBezeichnung model teilIdx s
+
+        InputZutat teilIdx zutatIdx s ->
+            inputZutat model teilIdx zutatIdx (\z -> { z | zutat = s })
+
+        InputMengeneinheit teilIdx zutatIdx s ->
+            inputZutat model teilIdx zutatIdx (\z -> { z | mengeneinheit = s })
+
+        InputMenge teilIdx zutatIdx s ->
+            case (String.toFloat s) of
+                Just f ->
+                    inputZutat model teilIdx zutatIdx (\z -> { z | menge = f })
+                Nothing ->
+                    (model, Cmd.none)
+
         SubmitRezeptNeu rd ->
             submitRezeptNeu rd model
 
-        SubmitRezeptNeuDone result ->
+        SubmitRezeptNeuDone rd result ->
             case result of
                 Ok url ->
                     (model, Nav.replaceUrl model.key url)
-                Err _ ->
-                    (model, Cmd.none)
+                Err s ->
+                    ({ model | currentRoute = AddNew (AddNewError rd (formatError s)) }, Cmd.none)
 
         CancelRezeptNeu ->
             (model, Nav.back model.key 1)
@@ -402,9 +490,78 @@ viewRezeptNeu addNewRoute =
         AddNewError rd _ ->
             viewRezeptForm rd
 
+viewRezeptZutatForm : Int -> Int -> RezeptZutat -> Html Msg
+viewRezeptZutatForm teilIdx idx zutat =
+    div [ class "field is-horizontal"]
+        [ div [ class "field-body" ]
+            [ div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("zutat-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , value zutat.zutat
+                        , placeholder "Zutat"
+                        , onInput (InputZutat teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            , div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("mengeneinheit-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , value zutat.mengeneinheit
+                        , placeholder "Mengeneinheit"
+                        , onInput (InputMengeneinheit teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            , div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("menge-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , value (String.fromFloat zutat.menge)
+                        , placeholder "Menge"
+                        , onInput (InputMenge teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            ]
+        ]
+
+viewRezeptTeilForm : Int -> RezeptTeil -> Html Msg
+viewRezeptTeilForm idx teil =
+    div [ class "box content" ]
+        ( div [ class "field"]
+            [ div [ class "control is-expandend" ]
+                [ input
+                    [ id ("bezeichnung_" ++ (String.fromInt idx))
+                    , class "input"
+                    , type_ "text"
+                    , value teil.bezeichnung
+                    , placeholder "Bezeichnung"
+                    , onInput (InputTeilBezeichnung idx)
+                    ]
+                    []
+                ]
+            ]
+        :: (List.indexedMap (viewRezeptZutatForm idx) teil.zutaten)
+        )
+
+rezeptValid : RezeptDetails -> Bool
+rezeptValid rd =
+    not (String.isEmpty rd.bezeichnung)
+
 viewRezeptForm : RezeptDetails -> Html Msg
 viewRezeptForm rd =
-    Html.form [ class "section" ]
+    div [ class "section" ]
         [ div [ class "field" ]
             [ label [ class "label", for "bezeichnung" ] [ text "Bezeichnung" ]
             , div [ class "control" ]
@@ -419,23 +576,42 @@ viewRezeptForm rd =
                     []
                 ]
             ]
-        , div [ class "field" ]
-            [ label [ class "label", for "anleitung" ] [ text "Anleitung" ]
-            , div [ class "control" ]
-                [ textarea
-                    [ id "anleitung"
-                    , class "textarea"
-                    , value rd.anleitung
-                    , placeholder "Anleitung"
-                    , attribute "rows" "5"
-                    , onInput InputAnleitung
+        , div [ class "columns" ]
+            [ div [ class "column" ]
+                ( [ label [ class "label" ] [ text "Rezeptteile" ] ]
+                ++ (List.indexedMap viewRezeptTeilForm rd.rezept_teile)
+                ++ [ button [ class "button", onClick AddRezeptTeil ]
+                        [ span [ class "icon" ]
+                            [ i [ class "far fa-plus-square"] [] ]
+                            , span [] [ text "Rezeptteil neu" ]
+                        ]
                     ]
-                    []
+                )
+            , div [ class "column is-two-thirds" ]
+                [ div [ class "field" ]
+                    [ label [ class "label", for "anleitung" ] [ text "Anleitung" ]
+                    , div [ class "control" ]
+                        [ textarea
+                            [ id "anleitung"
+                            , class "textarea"
+                            , value rd.anleitung
+                            , placeholder "Anleitung"
+                            , attribute "rows" "5"
+                            , onInput InputAnleitung
+                            ]
+                            []
+                        ]
+                    ]
                 ]
             ]
         , div [ class "field is-grouped" ]
             [ div [ class "control" ]
-                [ button [ class "button is-primary", type_ "button", onClick (SubmitRezeptNeu rd) ]
+                [ button
+                    [ class "button is-primary"
+                    , type_ "button"
+                    , disabled (not (rezeptValid rd))
+                    , onClick (SubmitRezeptNeu rd)
+                    ]
                     [ text "Speichern" ] ]
             , div [ class "control" ]
                 [ button [ class "button is-danger", type_ "button", onClick CancelRezeptNeu ]
