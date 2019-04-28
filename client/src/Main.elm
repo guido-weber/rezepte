@@ -149,6 +149,7 @@ type Msg
     | InputZutat Int Int String
     | InputMengeneinheit Int Int String
     | InputMenge Int Int String
+    | InputBemerkung Int Int String
     | SubmitRezeptNeu RezeptDetails
     | SubmitRezeptNeuDone RezeptDetails (Result Http.Error String)
     | CancelRezeptNeu
@@ -277,6 +278,9 @@ update msg model =
 
         InputMengeneinheit teilIdx zutatIdx s ->
             inputZutat model teilIdx zutatIdx (\z -> { z | mengeneinheit = s })
+
+        InputBemerkung teilIdx zutatIdx s ->
+            inputZutat model teilIdx zutatIdx (\z -> { z | bemerkung = s })
 
         InputMenge teilIdx zutatIdx s ->
             case (String.toFloat s) of
@@ -433,13 +437,15 @@ viewRezeptListe listeRoute =
 
 viewRezeptZutat : RezeptZutat -> Html Msg
 viewRezeptZutat zutat =
-    li []
-        [ text (String.fromFloat zutat.menge)
-        , text " "
-        , text zutat.mengeneinheit
-        , text " "
-        , text zutat.zutat
-        ]
+    let
+        menge = if zutat.menge == 0 then "" else String.fromFloat zutat.menge
+        first = String.trim (String.concat (List.intersperse " " [menge, zutat.mengeneinheit, zutat.zutat]))
+        all = if String.isEmpty zutat.bemerkung
+            then first
+            else (String.concat (List.intersperse ", " [first, zutat.bemerkung]))
+    in
+        li []
+            [ text all ]
 
 viewRezeptTeil : RezeptTeil -> Html Msg
 viewRezeptTeil teil =
@@ -457,7 +463,9 @@ viewRezeptDetails rezept =
             [ div [ class "column" ]
                 (List.map viewRezeptTeil rezept.rezept_teile)
             , div [ class "column is-two-thirds" ]
-                [ div [ class "content" ] [ text rezept.anleitung ] ]
+                [ div [ class "content", style "white-space" "pre-line" ]
+                    [ text rezept.anleitung ]
+                ]
             ]
         ]
 
@@ -481,6 +489,7 @@ viewRezeptZutatForm teilIdx idx zutat =
                         [ id ("zutat-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
                         , class "input is-small"
                         , type_ "text"
+                        , size 12
                         , value zutat.zutat
                         , placeholder "Zutat"
                         , onInput (InputZutat teilIdx idx)
@@ -494,6 +503,7 @@ viewRezeptZutatForm teilIdx idx zutat =
                         [ id ("menge-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
                         , class "input is-small"
                         , type_ "text"
+                        , size 6
                         , value (String.fromFloat zutat.menge)
                         , placeholder "Menge"
                         , onInput (InputMenge teilIdx idx)
@@ -501,13 +511,13 @@ viewRezeptZutatForm teilIdx idx zutat =
                         []
                     ]
                 ]
-            ]
             , div [ class "field" ]
                 [ p [ class "control" ]
                     [ input
                         [ id ("mengeneinheit-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
                         , class "input is-small"
                         , type_ "text"
+                        , size 8
                         , value zutat.mengeneinheit
                         , placeholder "Mengeneinheit"
                         , onInput (InputMengeneinheit teilIdx idx)
@@ -515,6 +525,20 @@ viewRezeptZutatForm teilIdx idx zutat =
                         []
                     ]
                 ]
+            , div [ class "field is-expanded" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("bemerkung-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , value zutat.bemerkung
+                        , placeholder "Bemerkung"
+                        , onInput (InputBemerkung teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            ]
         ]
 
 viewRezeptTeilForm : Int -> RezeptTeil -> Html Msg
