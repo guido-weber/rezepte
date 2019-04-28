@@ -15,6 +15,7 @@ func NewRouter() *mux.Router {
 	router := mux.NewRouter().StrictSlash(true)
 	router.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("../assets"))))
 	router.Handle("/api/rezepte", RezepteHandler{router: router}).Methods("GET").Name("RezepteAPI")
+	router.Handle("/api/rezepte", RezeptPostHandler{router: router}).Methods("POST")
 	router.Handle("/api/rezepte/{key}", RezeptDetailsHandler{router: router}).Methods("GET").Name("RezeptAPI")
 	router.HandleFunc("/rezepte/{key}", spaHandler).Methods("GET").Name("RezeptUI")
 	router.HandleFunc("/", spaHandler).Methods("GET").Name("RezepteUi")

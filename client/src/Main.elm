@@ -2,9 +2,10 @@ import Browser
 import Browser.Navigation as Nav
 import Html exposing (..)
 import Html.Attributes exposing (..)
-import Html.Events exposing (onClick, custom)
+import Html.Events exposing (onClick, onInput, custom)
 import Http
 import Json.Decode as JD
+import Json.Encode as JE
 import Url
 import Url.Parser as UP exposing ((</>))
 import Attributes exposing (..)
@@ -22,31 +23,7 @@ main =
         , onUrlRequest = LinkClicked
         }
 
--- Routes
-
-type Route
-    = Home
-    | Detail Int
-    | Unknown String
-
-routeParser : UP.Parser (Route -> a) a
-routeParser =
-    UP.oneOf
-        [ UP.map Home    UP.top
-        , UP.map Detail  (UP.s "rezepte" </> UP.int)
-        ]
-
-routeFromUrl : Url.Url -> Route
-routeFromUrl url =
-    case UP.parse routeParser url of
-        Nothing ->
-            Unknown (Url.toString url)
-        Just route ->
-            route
-
 -- Rezepte
-
-type Status a = Initial | Loading | Success a | Failure
 
 type alias RezeptKopf =
     { api_link : String
@@ -80,19 +57,82 @@ type alias RezeptDetails =
     , rezept_teile : List RezeptTeil
     }
 
+neuerRezeptTeil : RezeptTeil
+neuerRezeptTeil =
+    (RezeptTeil -1 "Zutaten" [ (RezeptZutat -1 "" 0 "" "") ])
+
+neueRezeptDetails : RezeptDetails
+neueRezeptDetails =
+    RezeptDetails "" "" -1 "" "" [] [ neuerRezeptTeil ]
+
+-- Routes & URLs
+
+routeParser : UP.Parser (Route -> a) a
+routeParser =
+    UP.oneOf
+        [ UP.map (Liste ListLoading) UP.top
+        , UP.map (\i -> Detail (DetailLoading i)) (UP.s "rezepte" </> UP.int)
+        , UP.map (AddNew (AddNewEntering neueRezeptDetails)) (UP.s "rezepte" </> UP.s "neu")
+        ]
+
+routeFromUrl : Url.Url -> Route
+routeFromUrl url =
+    case UP.parse routeParser url of
+        Nothing ->
+            Unknown (Url.toString url)
+        Just route ->
+            route
+
+changeRoute : Route -> Model -> ( Model, Cmd Msg )
+changeRoute route model =
+    let
+        new_model = { model | currentRoute = route, navbarBurgerExpanded = False }
+    in
+        case route of
+            Liste _ ->
+                (new_model, getRezeptListe)
+            Detail (DetailLoading key) ->
+                (new_model, getRezeptDetails key)
+            _ ->
+                (new_model, Cmd.none)
+
+changeUrl : Url.Url -> Model -> ( Model, Cmd Msg )
+changeUrl url model =
+    changeRoute (routeFromUrl url) model
+
 -- Model
+
+type ListRoute
+    = ListLoading
+    | ListLoaded (List RezeptKopf)
+    | ListError String
+
+type DetailRoute
+    = DetailLoading Int
+    | DetailOK RezeptDetails
+    | DetailError String
+
+type AddNewRoute
+    = AddNewEntering RezeptDetails
+    | AddNewSubmitted RezeptDetails
+    | AddNewError RezeptDetails String
+
+type Route
+    = Initial
+    | Liste ListRoute
+    | Detail DetailRoute
+    | AddNew AddNewRoute
+    | Unknown String
 
 type alias Model =
     { key : Nav.Key
-    , current_route : Route
     , navbarBurgerExpanded : Bool
-    , rezeptListe : Status (List RezeptKopf)
-    , rezept : Status RezeptDetails
+    , currentRoute : Route
     }
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
-    changeUrl url (Model key Home False Initial Initial)
+    changeUrl url (Model key False Initial)
 
 -- UPDATE
 
@@ -102,23 +142,86 @@ type Msg
     | GotRezeptListe (Result Http.Error (List RezeptKopf))
     | GotRezeptDetails (Result Http.Error RezeptDetails)
     | ToggleBurgerMenu
+    | InputBezeichnung String
+    | InputAnleitung String
+    | AddRezeptTeil
+    | InputTeilBezeichnung Int String
+    | InputZutat Int Int String
+    | InputMengeneinheit Int Int String
+    | InputMenge Int Int String
+    | InputBemerkung Int Int String
+    | SubmitRezeptNeu RezeptDetails
+    | SubmitRezeptNeuDone RezeptDetails (Result Http.Error String)
+    | CancelRezeptNeu
 
-changeRoute : Route -> Model -> ( Model, Cmd Msg )
-changeRoute route model =
+addRezeptTeil : Model -> ( Model, Cmd Msg )
+addRezeptTeil model =
+    case model.currentRoute of
+        AddNew (AddNewEntering details) ->
+            let
+                neu = (List.append details.rezept_teile [ neuerRezeptTeil ])
+            in
+                ( { model | currentRoute = AddNew (AddNewEntering {details | rezept_teile = neu}) }
+                , Cmd.none
+                )
+        _ ->
+            (model, Cmd.none)
+
+replaceTeil : RezeptDetails -> Int -> (RezeptTeil -> RezeptTeil) -> RezeptDetails
+replaceTeil details idx fct =
     let
-        cmd = case route of
-            Home ->
-                getRezeptListe
-            Detail key ->
-                getRezeptDetails key
-            Unknown _ ->
-                Cmd.none
+        neu = (List.indexedMap
+                (\n -> \t -> if n == idx then (fct t) else t)
+                details.rezept_teile)
     in
-        ( { model | current_route = route }, cmd )
+        {details | rezept_teile = neu}
 
-changeUrl : Url.Url -> Model -> ( Model, Cmd Msg )
-changeUrl url model =
-    changeRoute (routeFromUrl url) model
+inputTeilBezeichnung : Model -> Int -> String -> ( Model, Cmd Msg )
+inputTeilBezeichnung model teilIdx s =
+    case model.currentRoute of
+        AddNew (AddNewEntering details) ->
+            let
+                neu = replaceTeil details teilIdx (\t -> { t | bezeichnung = s })
+            in
+                ( { model | currentRoute = AddNew (AddNewEntering neu) }
+                , Cmd.none
+                )
+        _ ->
+            (model, Cmd.none)
+
+replaceZutat : RezeptTeil -> Int -> (RezeptZutat -> RezeptZutat) -> RezeptTeil
+replaceZutat teil idx fct =
+    let
+        replaced = (List.indexedMap
+                (\n -> \z -> if n == idx then (fct z) else z)
+                teil.zutaten)
+        neu = if (List.length teil.zutaten) == (idx + 1)
+            then (List.append replaced [ (RezeptZutat -1 "" 0 "" "") ])
+            else replaced
+    in
+        {teil | zutaten = neu}
+
+inputZutat : Model -> Int -> Int -> (RezeptZutat -> RezeptZutat) -> ( Model, Cmd Msg )
+inputZutat model teilIdx zutatIdx fct =
+    case model.currentRoute of
+        AddNew (AddNewEntering details) ->
+            let
+                neu = replaceTeil details teilIdx (\t -> replaceZutat t zutatIdx fct)
+            in
+                ( { model | currentRoute = AddNew (AddNewEntering neu) }
+                , Cmd.none
+                )
+        _ ->
+            (model, Cmd.none)
+
+formatError : Http.Error -> String
+formatError error =
+    case error of
+        Http.BadUrl s -> "Bad URL: " ++ s
+        Http.Timeout -> "Timeout"
+        Http.NetworkError -> "Network Error"
+        Http.BadStatus status -> "Bad Status: " ++ (String.fromInt status)
+        Http.BadBody s -> "Bad Body: " ++ s
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -136,19 +239,68 @@ update msg model =
         GotRezeptListe result ->
             case result of
                 Ok rezeptListe ->
-                    ({ model | rezeptListe = Success rezeptListe }, Cmd.none)
-                Err _ ->
-                    ({ model | rezeptListe = Failure }, Cmd.none)
+                    ({ model | currentRoute = Liste (ListLoaded rezeptListe) }, Cmd.none)
+                Err s ->
+                    ({ model | currentRoute = Liste (ListError (formatError s)) }, Cmd.none)
 
         GotRezeptDetails result ->
             case result of
                 Ok rezept ->
-                    ({ model | rezept = Success rezept }, Cmd.none)
-                Err _ ->
-                    ({ model | rezept = Failure }, Cmd.none)
+                    ({ model | currentRoute = Detail (DetailOK rezept) }, Cmd.none)
+                Err s ->
+                    ({ model | currentRoute = Detail (DetailError (formatError s)) }, Cmd.none)
 
         ToggleBurgerMenu ->
             ({ model | navbarBurgerExpanded = not model.navbarBurgerExpanded }, Cmd.none)
+
+        InputBezeichnung s ->
+            case model.currentRoute of
+                AddNew (AddNewEntering details) ->
+                    ( { model | currentRoute = AddNew (AddNewEntering {details | bezeichnung = s}) }, Cmd.none)
+                _ ->
+                    (model, Cmd.none)
+
+        InputAnleitung s ->
+            case model.currentRoute of
+                AddNew (AddNewEntering details) ->
+                    ( { model | currentRoute = AddNew (AddNewEntering {details | anleitung = s}) }, Cmd.none)
+                _ ->
+                    (model, Cmd.none)
+
+        AddRezeptTeil ->
+            addRezeptTeil model
+
+        InputTeilBezeichnung teilIdx s ->
+            inputTeilBezeichnung model teilIdx s
+
+        InputZutat teilIdx zutatIdx s ->
+            inputZutat model teilIdx zutatIdx (\z -> { z | zutat = s })
+
+        InputMengeneinheit teilIdx zutatIdx s ->
+            inputZutat model teilIdx zutatIdx (\z -> { z | mengeneinheit = s })
+
+        InputBemerkung teilIdx zutatIdx s ->
+            inputZutat model teilIdx zutatIdx (\z -> { z | bemerkung = s })
+
+        InputMenge teilIdx zutatIdx s ->
+            case (String.toFloat s) of
+                Just f ->
+                    inputZutat model teilIdx zutatIdx (\z -> { z | menge = f })
+                Nothing ->
+                    (model, Cmd.none)
+
+        SubmitRezeptNeu rd ->
+            submitRezeptNeu rd model
+
+        SubmitRezeptNeuDone rd result ->
+            case result of
+                Ok url ->
+                    (model, Nav.replaceUrl model.key url)
+                Err s ->
+                    ({ model | currentRoute = AddNew (AddNewError rd (formatError s)) }, Cmd.none)
+
+        CancelRezeptNeu ->
+            (model, Nav.back model.key 1)
 
 -- SUBSCRIPTIONS
 
@@ -160,19 +312,46 @@ subscriptions _ =
 
 view : Model -> Browser.Document Msg
 view model =
-    case model.current_route of
-        Home ->
+    case model.currentRoute of
+        Initial ->
             { title = "Rezepte"
             , body =
                 [ viewNavbar model
-                , viewRezeptListe model.rezeptListe
                 ]
             }
-        Detail key ->
-            { title = "Rezept " ++ (String.fromInt key)
+        Liste listRoute ->
+            { title = "Rezepte"
             , body =
                 [ viewNavbar model
-                , viewRezeptDetails model.rezept
+                , viewRezeptListe listRoute
+                ]
+            }
+        Detail (DetailLoading i) ->
+            { title = "Lade Rezept " ++ (String.fromInt i)
+            , body =
+                [ viewNavbar model
+                , text "Wait ..."
+                ]
+            }
+        Detail (DetailOK rezeptDetails) ->
+            { title = rezeptDetails.bezeichnung
+            , body =
+                [ viewNavbar model
+                , viewRezeptDetails rezeptDetails
+                ]
+            }
+        Detail (DetailError msg) ->
+            { title = "Fehler!"
+            , body =
+                [ viewNavbar model
+                , text msg
+                ]
+            }
+        AddNew addNewRoute ->
+            { title = "Neu"
+            , body =
+                [ viewNavbar model
+                , viewRezeptNeu addNewRoute
                 ]
             }
         Unknown msg ->
@@ -197,6 +376,9 @@ viewNavbar model =
         isActive = case model.navbarBurgerExpanded of
             True -> " is-active"
             False -> ""
+        showNewButton = case model.currentRoute of
+            AddNew _ -> False
+            _ -> True
     in
         nav [ class "navbar is-fixed-top is-info", role "navigation", ariaLabel "main navigation"]
             [ div [class "navbar-brand"]
@@ -216,10 +398,13 @@ viewNavbar model =
             , div [ class ("navbar-menu" ++ isActive) ]
                   [ div [ class "navbar-end" ]
                         [ div [ class "navbar-item" ]
-                              [ div [ class "buttons" ]
-                                    [ button [ class "button" ] [ text "Neu" ]
+                            (if showNewButton then
+                                [ div [ class "buttons" ]
+                                    [ a [ href "/rezepte/neu", class "button" ] [ text "Neu" ]
                                     ]
-                              ]
+                                ]
+                            else
+                                [])
                         ]
                   ]
             ]
@@ -238,29 +423,29 @@ viewRezeptElement rezept =
             [ div [ class "tags" ] (List.map viewRezeptTag rezept.tags) ]
         ]
 
-viewRezeptListe : Status (List RezeptKopf) -> Html Msg
-viewRezeptListe rezeptListeStatus =
-    case rezeptListeStatus of
-        Initial ->
-            text "Initial"
-        Loading ->
+viewRezeptListe : ListRoute -> Html Msg
+viewRezeptListe listeRoute =
+    case listeRoute of
+        ListLoading ->
             text "Wait ..."
-        Success rezeptListe ->
+        ListLoaded rezeptListe ->
             section [class "section"]
                 [ div [ class "container is-widescreen rezept-liste" ]
                     (List.map viewRezeptElement rezeptListe) ]
-        Failure ->
-            text "Oops!"
+        ListError msg ->
+            text ("Oops: " ++ msg)
 
 viewRezeptZutat : RezeptZutat -> Html Msg
 viewRezeptZutat zutat =
-    li []
-        [ text (String.fromFloat zutat.menge)
-        , text " "
-        , text zutat.mengeneinheit
-        , text " "
-        , text zutat.zutat
-        ]
+    let
+        menge = if zutat.menge == 0 then "" else String.fromFloat zutat.menge
+        first = String.trim (String.concat (List.intersperse " " [menge, zutat.mengeneinheit, zutat.zutat]))
+        all = if String.isEmpty zutat.bemerkung
+            then first
+            else (String.concat (List.intersperse ", " [first, zutat.bemerkung]))
+    in
+        li []
+            [ text all ]
 
 viewRezeptTeil : RezeptTeil -> Html Msg
 viewRezeptTeil teil =
@@ -269,26 +454,182 @@ viewRezeptTeil teil =
         , ul [] (List.map viewRezeptZutat teil.zutaten)
         ]
 
-viewRezeptDetails : Status RezeptDetails -> Html Msg
-viewRezeptDetails rezeptDetailsStatus =
-    case rezeptDetailsStatus of
-        Initial ->
-            text "Initial"
-        Loading ->
-            text "Wait ..."
-        Success rezept ->
-            section [class "section"]
-                [ h1 [ class "title" ] [ text rezept.bezeichnung ]
-                , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
-                , div [ class "columns" ]
-                    [ div [ class "column" ]
-                        (List.map viewRezeptTeil rezept.rezept_teile)
-                    , div [ class "column is-two-thirds" ]
-                        [ div [ class "content" ] [ text rezept.anleitung ] ]
+viewRezeptDetails : RezeptDetails -> Html Msg
+viewRezeptDetails rezept =
+    section [ class "section" ]
+        [ h1 [ class "title" ] [ text rezept.bezeichnung ]
+        , div [ class "tags" ] (List.map viewRezeptTag rezept.tags)
+        , div [ class "columns" ]
+            [ div [ class "column" ]
+                (List.map viewRezeptTeil rezept.rezept_teile)
+            , div [ class "column is-two-thirds" ]
+                [ div [ class "content", style "white-space" "pre-line" ]
+                    [ text rezept.anleitung ]
+                ]
+            ]
+        ]
+
+viewRezeptNeu : AddNewRoute -> Html Msg
+viewRezeptNeu addNewRoute =
+    case addNewRoute of
+        AddNewEntering rd ->
+            viewRezeptForm rd
+        AddNewSubmitted rd ->
+            viewRezeptForm rd
+        AddNewError rd _ ->
+            viewRezeptForm rd
+
+viewRezeptZutatForm : Int -> Int -> RezeptZutat -> Html Msg
+viewRezeptZutatForm teilIdx idx zutat =
+    div [ class "field is-horizontal"]
+        [ div [ class "field-body" ]
+            [ div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("zutat-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , size 12
+                        , value zutat.zutat
+                        , placeholder "Zutat"
+                        , onInput (InputZutat teilIdx idx)
+                        ]
+                        []
                     ]
                 ]
-        Failure ->
-            text "Oops!"
+            , div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("menge-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , size 6
+                        , value (String.fromFloat zutat.menge)
+                        , placeholder "Menge"
+                        , onInput (InputMenge teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            , div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("mengeneinheit-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , size 8
+                        , value zutat.mengeneinheit
+                        , placeholder "Mengeneinheit"
+                        , onInput (InputMengeneinheit teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            , div [ class "field is-expanded" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("bemerkung-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , value zutat.bemerkung
+                        , placeholder "Bemerkung"
+                        , tabindex -1
+                        , onInput (InputBemerkung teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
+            ]
+        ]
+
+viewRezeptTeilForm : Int -> RezeptTeil -> Html Msg
+viewRezeptTeilForm idx teil =
+    div [ class "box content" ]
+        ( div [ class "field"]
+            [ div [ class "control is-expandend" ]
+                [ input
+                    [ id ("bezeichnung_" ++ (String.fromInt idx))
+                    , class "input"
+                    , type_ "text"
+                    , value teil.bezeichnung
+                    , placeholder "Bezeichnung"
+                    , onInput (InputTeilBezeichnung idx)
+                    ]
+                    []
+                ]
+            ]
+        :: (List.indexedMap (viewRezeptZutatForm idx) teil.zutaten)
+        )
+
+rezeptValid : RezeptDetails -> Bool
+rezeptValid rd =
+    ( not (String.isEmpty rd.bezeichnung)
+    && (List.all rezeptTeilValid rd.rezept_teile)
+    )
+
+rezeptTeilValid : RezeptTeil -> Bool
+rezeptTeilValid teil =
+    not (String.isEmpty teil.bezeichnung)
+
+viewRezeptForm : RezeptDetails -> Html Msg
+viewRezeptForm rd =
+    div [ class "section" ]
+        [ div [ class "field" ]
+            [ label [ class "label", for "bezeichnung" ] [ text "Bezeichnung" ]
+            , div [ class "control" ]
+                [ input
+                    [ id "bezeichnung"
+                    , class "input"
+                    , type_ "text"
+                    , value rd.bezeichnung
+                    , placeholder "Rezeptbezeichnung"
+                    , onInput InputBezeichnung
+                    ]
+                    []
+                ]
+            ]
+        , div [ class "columns" ]
+            [ div [ class "column" ]
+                ( [ label [ class "label" ] [ text "Rezeptteile" ] ]
+                ++ (List.indexedMap viewRezeptTeilForm rd.rezept_teile)
+                ++ [ button [ class "button", onClick AddRezeptTeil ]
+                        [ span [ class "icon" ]
+                            [ i [ class "far fa-plus-square"] [] ]
+                            , span [] [ text "Rezeptteil neu" ]
+                        ]
+                    ]
+                )
+            , div [ class "column is-two-thirds" ]
+                [ div [ class "field" ]
+                    [ label [ class "label", for "anleitung" ] [ text "Anleitung" ]
+                    , div [ class "control" ]
+                        [ textarea
+                            [ id "anleitung"
+                            , class "textarea"
+                            , value rd.anleitung
+                            , placeholder "Anleitung"
+                            , attribute "rows" "5"
+                            , onInput InputAnleitung
+                            ]
+                            []
+                        ]
+                    ]
+                ]
+            ]
+        , div [ class "field is-grouped" ]
+            [ div [ class "control" ]
+                [ button
+                    [ class "button is-primary"
+                    , type_ "button"
+                    , disabled (not (rezeptValid rd))
+                    , onClick (SubmitRezeptNeu rd)
+                    ]
+                    [ text "Speichern" ] ]
+            , div [ class "control" ]
+                [ button [ class "button is-danger", type_ "button", onClick CancelRezeptNeu ]
+                    [ text "Abbrechen" ] ]
+            ]
+        ]
 
 -- HTTP
 
@@ -345,3 +686,40 @@ rezeptDetailsDecoder =
         (JD.field "Anleitung" JD.string)
         (JD.field "Tags" (JD.list JD.string))
         (JD.field "RezeptTeile" (JD.list rezeptTeilDecoder))
+
+submitRezeptNeu : RezeptDetails -> Model -> ( Model, Cmd Msg )
+submitRezeptNeu rd model =
+    ( { model | currentRoute = AddNew (AddNewSubmitted rd) }
+    , Http.request
+        { method = "POST"
+        , headers = []
+        , url = "/api/rezepte"
+        , body = Http.jsonBody (rezeptDetailsEncoder rd)
+        , expect = Http.expectJson (SubmitRezeptNeuDone rd) JD.string
+        , timeout = Nothing
+        , tracker = Nothing
+    } )
+
+rezeptDetailsEncoder : RezeptDetails -> JE.Value
+rezeptDetailsEncoder rd =
+    JE.object
+        [ ( "Bezeichnung", JE.string rd.bezeichnung )
+        , ( "Anleitung", JE.string rd.anleitung )
+        , ( "RezeptTeile", JE.list rezeptTeilEncoder rd.rezept_teile )
+        ]
+
+rezeptTeilEncoder : RezeptTeil -> JE.Value
+rezeptTeilEncoder teil =
+    JE.object
+        [ ( "Bezeichnung", JE.string teil.bezeichnung )
+        , ( "Zutaten", JE.list rezeptZutatEncoder teil.zutaten )
+        ]
+
+rezeptZutatEncoder : RezeptZutat -> JE.Value
+rezeptZutatEncoder zutat =
+    JE.object
+        [ ( "Zutat", JE.string zutat.zutat )
+        , ( "Menge", JE.float zutat.menge )
+        , ( "Mengeneinheit", JE.string zutat.mengeneinheit )
+        , ( "Bemerkung", JE.string zutat.bemerkung )
+        ]

@@ -5,5 +5,4 @@ repl-temp-*
 
 .DS_Store
 assets/main.js
-assets/bulma.css
 rezepte_server/rezepte_server

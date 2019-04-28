@@ -16,14 +16,14 @@ import (
 type RezeptKopf struct {
 	APILink     string   `JSON:"APILink"`
 	UILink      string   `JSON:"UILink"`
-	RezeptID    int      `JSON:"RezeptID"`
+	RezeptID    int64    `JSON:"RezeptID"`
 	Bezeichnung string   `JSON:"Bezeichnung"`
 	Tags        []string `JSON:"Tags"`
 }
 
 // RezeptZutat bla
 type RezeptZutat struct {
-	RezeptZutatID int     `JSON:"RezeptZutatID"`
+	RezeptZutatID int64   `JSON:"RezeptZutatID"`
 	Zutat         string  `JSON:"Zutat"`
 	Menge         float64 `JSON:"Menge"`
 	Mengeneinheit string  `JSON:"Mengeneinheit"`
@@ -32,7 +32,7 @@ type RezeptZutat struct {
 
 // RezeptTeil bla
 type RezeptTeil struct {
-	RezeptTeilID int           `JSON:"RezeptTeilID"`
+	RezeptTeilID int64         `JSON:"RezeptTeilID"`
 	Bezeichnung  string        `JSON:"Bezeichnung"`
 	Zutaten      []RezeptZutat `JSON:"Zutaten"`
 }
@@ -49,17 +49,22 @@ type RezepteHandler struct {
 	router *mux.Router
 }
 
+// RezeptPostHandler is used to create new entries
+type RezeptPostHandler struct {
+	router *mux.Router
+}
+
 // RezeptDetailsHandler serves RezeptDetails as JSON
 type RezeptDetailsHandler struct {
 	router *mux.Router
 }
 
-func getLink(router *mux.Router, routeName string, key int) (string, error) {
+func getLink(router *mux.Router, routeName string, key int64) (string, error) {
 	apiRoute := router.Get(routeName)
 	if apiRoute == nil {
 		return "", errors.New("Route " + routeName + " nicht definiert")
 	}
-	url, err := apiRoute.URL("key", strconv.Itoa(key))
+	url, err := apiRoute.URL("key", strconv.FormatInt(key, 10))
 	if err != nil {
 		return "", err
 	}
@@ -121,6 +126,81 @@ func (hndlr RezepteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rezepte)
 }
 
+const rezeptInsertQuery = `INSERT INTO tbl_rezepte
+	(bezeichnung, anleitung)
+	VALUES (?, ?)`
+const rezeptTeilInsertQuery = `INSERT INTO tbl_rezept_teile
+	(rezept_id, bezeichnung, reihenfolge)
+	VALUES (?, ?, ?)`
+const rezeptZutatInsertQuery = `INSERT INTO tbl_rezept_zutaten
+	(rezept_id, rezept_teil_id, zutat, reihenfolge, menge, mengeneinheit, bemerkung)
+	VALUES (?, ?, ?, ?, ?, ?, ?)`
+
+func (hndlr RezeptPostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var rd RezeptDetails
+	if err := json.NewDecoder(r.Body).Decode(&rd); err != nil {
+		log.Fatal(err)
+	}
+	log.Print("POSTed: ", rd)
+
+	tx, err := DB.Begin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	result, err := tx.Exec(rezeptInsertQuery, rd.Bezeichnung, rd.Anleitung)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			log.Fatalf("rezeptInsertQuery: unable to rollback: %v", rollbackErr)
+		}
+		log.Fatal(err)
+	}
+	rezeptID, err := result.LastInsertId()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Print("rezeptID: ", rezeptID)
+
+	for tidx, teil := range rd.RezeptTeile {
+		tresult, err := tx.Exec(rezeptTeilInsertQuery, rezeptID, teil.Bezeichnung, tidx)
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Fatalf("rezeptTeilInsertQuery: unable to rollback: %v", rollbackErr)
+			}
+			log.Fatal(err)
+		}
+		rezeptTeilID, err := tresult.LastInsertId()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Print("rezeptTeilID: ", rezeptTeilID)
+		for zidx, zutat := range teil.Zutaten {
+			if zutat.Zutat != "" {
+				log.Print("Zutat: ", zutat)
+				_, err := tx.Exec(rezeptZutatInsertQuery, rezeptID, rezeptTeilID,
+					zutat.Zutat, zidx, zutat.Menge, zutat.Mengeneinheit, zutat.Bemerkung)
+				if err != nil {
+					if rollbackErr := tx.Rollback(); rollbackErr != nil {
+						log.Fatalf("rezeptZutatInsertQuery: unable to rollback: %v", rollbackErr)
+					}
+					log.Fatal(err)
+				}
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Fatal(err)
+	}
+
+	link, err := getLink(hndlr.router, "RezeptUI", rezeptID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(link)
+}
+
 const rezeptDetailsQuery = `SELECT bezeichnung, anleitung, GROUP_CONCAT(rt.tag) tags
 	FROM tbl_rezepte r LEFT JOIN tbl_rezept_tags rt ON r.rezept_id = rt.rezept_id
 	WHERE r.rezept_id = ?
@@ -129,7 +209,7 @@ const rezeptDetailsQuery = `SELECT bezeichnung, anleitung, GROUP_CONCAT(rt.tag) 
 func (hndlr RezeptDetailsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var rd RezeptDetails
 	vars := mux.Vars(r)
-	if key, err := strconv.Atoi(vars["key"]); err != nil {
+	if key, err := strconv.ParseInt(vars["key"], 10, 64); err != nil {
 		log.Fatal(err)
 	} else {
 		rd.RezeptID = key
@@ -169,14 +249,13 @@ func readZutaten(rd *RezeptDetails) error {
 	var rt *RezeptTeil
 	for rows.Next() {
 		var rz RezeptZutat
-		var teilID int
+		var teilID int64
 		var bezeichnung string
 		if err := rows.Scan(
 			&teilID, &bezeichnung,
 			&rz.RezeptZutatID, &rz.Zutat, &rz.Menge, &rz.Mengeneinheit, &rz.Bemerkung); err != nil {
 			return err
 		}
-		zutaten = append(zutaten, rz)
 		if rt == nil {
 			rt = &RezeptTeil{RezeptTeilID: teilID, Bezeichnung: bezeichnung}
 		} else if teilID != rt.RezeptTeilID {
@@ -185,6 +264,7 @@ func readZutaten(rd *RezeptDetails) error {
 			rt = &RezeptTeil{RezeptTeilID: teilID, Bezeichnung: bezeichnung}
 			zutaten = make([]RezeptZutat, 0)
 		}
+		zutaten = append(zutaten, rz)
 	}
 	if err := rows.Err(); err != nil {
 		return err
