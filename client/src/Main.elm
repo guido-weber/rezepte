@@ -533,6 +533,7 @@ viewRezeptZutatForm teilIdx idx zutat =
                         , type_ "text"
                         , value zutat.bemerkung
                         , placeholder "Bemerkung"
+                        , tabindex -1
                         , onInput (InputBemerkung teilIdx idx)
                         ]
                         []
