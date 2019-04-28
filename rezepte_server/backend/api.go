@@ -126,7 +126,15 @@ func (hndlr RezepteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(rezepte)
 }
 
-const rezeptInsertQuery = `INSERT INTO tbl_rezepte (bezeichnung, anleitung) VALUES (?, ?)`
+const rezeptInsertQuery = `INSERT INTO tbl_rezepte
+	(bezeichnung, anleitung)
+	VALUES (?, ?)`
+const rezeptTeilInsertQuery = `INSERT INTO tbl_rezept_teile
+	(rezept_id, bezeichnung, reihenfolge)
+	VALUES (?, ?, ?)`
+const rezeptZutatInsertQuery = `INSERT INTO tbl_rezept_zutaten
+	(rezept_id, rezept_teil_id, zutat, reihenfolge, menge, mengeneinheit, bemerkung)
+	VALUES (?, ?, ?, ?, ?, ?, ?)`
 
 func (hndlr RezeptPostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var rd RezeptDetails
@@ -134,14 +142,57 @@ func (hndlr RezeptPostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		log.Fatal(err)
 	}
 	log.Print("POSTed: ", rd)
-	result, err := DB.Exec(rezeptInsertQuery, rd.Bezeichnung, rd.Anleitung)
+
+	tx, err := DB.Begin()
 	if err != nil {
+		log.Fatal(err)
+	}
+
+	result, err := tx.Exec(rezeptInsertQuery, rd.Bezeichnung, rd.Anleitung)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			log.Fatalf("rezeptInsertQuery: unable to rollback: %v", rollbackErr)
+		}
 		log.Fatal(err)
 	}
 	rezeptID, err := result.LastInsertId()
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Print("rezeptID: ", rezeptID)
+
+	for tidx, teil := range rd.RezeptTeile {
+		tresult, err := tx.Exec(rezeptTeilInsertQuery, rezeptID, teil.Bezeichnung, tidx)
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Fatalf("rezeptTeilInsertQuery: unable to rollback: %v", rollbackErr)
+			}
+			log.Fatal(err)
+		}
+		rezeptTeilID, err := tresult.LastInsertId()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Print("rezeptTeilID: ", rezeptTeilID)
+		for zidx, zutat := range teil.Zutaten {
+			if zutat.Zutat != "" {
+				log.Print("Zutat: ", zutat)
+				_, err := tx.Exec(rezeptZutatInsertQuery, rezeptID, rezeptTeilID,
+					zutat.Zutat, zidx, zutat.Menge, zutat.Mengeneinheit, zutat.Bemerkung)
+				if err != nil {
+					if rollbackErr := tx.Rollback(); rollbackErr != nil {
+						log.Fatalf("rezeptZutatInsertQuery: unable to rollback: %v", rollbackErr)
+					}
+					log.Fatal(err)
+				}
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		log.Fatal(err)
+	}
+
 	link, err := getLink(hndlr.router, "RezeptUI", rezeptID)
 	if err != nil {
 		log.Fatal(err)
@@ -205,7 +256,6 @@ func readZutaten(rd *RezeptDetails) error {
 			&rz.RezeptZutatID, &rz.Zutat, &rz.Menge, &rz.Mengeneinheit, &rz.Bemerkung); err != nil {
 			return err
 		}
-		zutaten = append(zutaten, rz)
 		if rt == nil {
 			rt = &RezeptTeil{RezeptTeilID: teilID, Bezeichnung: bezeichnung}
 		} else if teilID != rt.RezeptTeilID {
@@ -214,6 +264,7 @@ func readZutaten(rd *RezeptDetails) error {
 			rt = &RezeptTeil{RezeptTeilID: teilID, Bezeichnung: bezeichnung}
 			zutaten = make([]RezeptZutat, 0)
 		}
+		zutaten = append(zutaten, rz)
 	}
 	if err := rows.Err(); err != nil {
 		return err

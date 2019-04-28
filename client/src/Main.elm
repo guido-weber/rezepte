@@ -213,25 +213,6 @@ inputZutat model teilIdx zutatIdx fct =
         _ ->
             (model, Cmd.none)
 
-submitRezeptNeu : RezeptDetails -> Model -> ( Model, Cmd Msg )
-submitRezeptNeu rd model =
-    let
-        json = JE.object
-            [ ( "Bezeichnung", JE.string rd.bezeichnung )
-            , ( "Anleitung", JE.string rd.anleitung )
-            ]
-    in
-        ( {model | currentRoute = AddNew (AddNewSubmitted rd)}
-        , Http.request
-            { method = "POST"
-            , headers = []
-            , url = "/api/rezepte"
-            , body = Http.jsonBody json
-            , expect = Http.expectJson (SubmitRezeptNeuDone rd) JD.string
-            , timeout = Nothing
-            , tracker = Nothing
-        } )
-
 formatError : Http.Error -> String
 formatError error =
     case error of
@@ -510,19 +491,6 @@ viewRezeptZutatForm teilIdx idx zutat =
             , div [ class "field" ]
                 [ p [ class "control" ]
                     [ input
-                        [ id ("mengeneinheit-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
-                        , class "input is-small"
-                        , type_ "text"
-                        , value zutat.mengeneinheit
-                        , placeholder "Mengeneinheit"
-                        , onInput (InputMengeneinheit teilIdx idx)
-                        ]
-                        []
-                    ]
-                ]
-            , div [ class "field" ]
-                [ p [ class "control" ]
-                    [ input
                         [ id ("menge-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
                         , class "input is-small"
                         , type_ "text"
@@ -534,6 +502,19 @@ viewRezeptZutatForm teilIdx idx zutat =
                     ]
                 ]
             ]
+            , div [ class "field" ]
+                [ p [ class "control" ]
+                    [ input
+                        [ id ("mengeneinheit-" ++ (String.fromInt teilIdx) ++ "-" ++ (String.fromInt idx))
+                        , class "input is-small"
+                        , type_ "text"
+                        , value zutat.mengeneinheit
+                        , placeholder "Mengeneinheit"
+                        , onInput (InputMengeneinheit teilIdx idx)
+                        ]
+                        []
+                    ]
+                ]
         ]
 
 viewRezeptTeilForm : Int -> RezeptTeil -> Html Msg
@@ -557,7 +538,13 @@ viewRezeptTeilForm idx teil =
 
 rezeptValid : RezeptDetails -> Bool
 rezeptValid rd =
-    not (String.isEmpty rd.bezeichnung)
+    ( not (String.isEmpty rd.bezeichnung)
+    && (List.all rezeptTeilValid rd.rezept_teile)
+    )
+
+rezeptTeilValid : RezeptTeil -> Bool
+rezeptTeilValid teil =
+    not (String.isEmpty teil.bezeichnung)
 
 viewRezeptForm : RezeptDetails -> Html Msg
 viewRezeptForm rd =
@@ -674,3 +661,40 @@ rezeptDetailsDecoder =
         (JD.field "Anleitung" JD.string)
         (JD.field "Tags" (JD.list JD.string))
         (JD.field "RezeptTeile" (JD.list rezeptTeilDecoder))
+
+submitRezeptNeu : RezeptDetails -> Model -> ( Model, Cmd Msg )
+submitRezeptNeu rd model =
+    ( { model | currentRoute = AddNew (AddNewSubmitted rd) }
+    , Http.request
+        { method = "POST"
+        , headers = []
+        , url = "/api/rezepte"
+        , body = Http.jsonBody (rezeptDetailsEncoder rd)
+        , expect = Http.expectJson (SubmitRezeptNeuDone rd) JD.string
+        , timeout = Nothing
+        , tracker = Nothing
+    } )
+
+rezeptDetailsEncoder : RezeptDetails -> JE.Value
+rezeptDetailsEncoder rd =
+    JE.object
+        [ ( "Bezeichnung", JE.string rd.bezeichnung )
+        , ( "Anleitung", JE.string rd.anleitung )
+        , ( "RezeptTeile", JE.list rezeptTeilEncoder rd.rezept_teile )
+        ]
+
+rezeptTeilEncoder : RezeptTeil -> JE.Value
+rezeptTeilEncoder teil =
+    JE.object
+        [ ( "Bezeichnung", JE.string teil.bezeichnung )
+        , ( "Zutaten", JE.list rezeptZutatEncoder teil.zutaten )
+        ]
+
+rezeptZutatEncoder : RezeptZutat -> JE.Value
+rezeptZutatEncoder zutat =
+    JE.object
+        [ ( "Zutat", JE.string zutat.zutat )
+        , ( "Menge", JE.float zutat.menge )
+        , ( "Mengeneinheit", JE.string zutat.mengeneinheit )
+        , ( "Bemerkung", JE.string zutat.bemerkung )
+        ]
