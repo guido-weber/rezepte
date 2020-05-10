@@ -88,7 +88,7 @@ routeFromUrl url =
 changeRoute : Route -> Model -> ( Model, Cmd Msg )
 changeRoute route model =
     let
-        new_model = { model | currentRoute = route, navbarBurgerExpanded = False }
+        new_model = { model | currentRoute = route }
     in
         case route of
             Liste _ ->
@@ -128,13 +128,12 @@ type Route
 
 type alias Model =
     { key : Nav.Key
-    , navbarBurgerExpanded : Bool
     , currentRoute : Route
     }
 
 init : () -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
-    changeUrl url (Model key False Initial)
+    changeUrl url (Model key Initial)
 
 -- UPDATE
 
@@ -143,7 +142,6 @@ type Msg
     | UrlChanged Url.Url
     | GotRezeptListe (Result Http.Error (List RezeptKopf))
     | GotRezeptDetails (Result Http.Error RezeptDetails)
-    | ToggleBurgerMenu
     | InputBezeichnung String
     | InputAnleitung String
     | AddRezeptTeil
@@ -251,9 +249,6 @@ update msg model =
                     ({ model | currentRoute = Detail (DetailOK rezept) }, Cmd.none)
                 Err s ->
                     ({ model | currentRoute = Detail (DetailError (formatError s)) }, Cmd.none)
-
-        ToggleBurgerMenu ->
-            ({ model | navbarBurgerExpanded = not model.navbarBurgerExpanded }, Cmd.none)
 
         InputBezeichnung s ->
             case model.currentRoute of
@@ -375,9 +370,6 @@ alwaysStopAndPreventDefault msg =
 viewNavbar : Model -> Html Msg
 viewNavbar model =
     let
-        isActive = case model.navbarBurgerExpanded of
-            True -> " is-active"
-            False -> ""
         showNewButton = case model.currentRoute of
             AddNew _ -> False
             _ -> True
@@ -385,29 +377,11 @@ viewNavbar model =
         nav [ class "navbar is-fixed-top is-info", role "navigation", ariaLabel "main navigation"]
             [ div [class "navbar-brand"]
                   [ a [ href "/", class "navbar-item" ] [ text "Home" ]
-                  , a [ role "button"
-                      , class ("navbar-burger burger" ++ isActive)
-                      , ariaLabel "menu"
-                      , ariaExpanded "false"
-                      , href "#"
-                      , onClick ToggleBurgerMenu
-                      ]
-                      [ span [ ariaHidden "true" ] []
-                      , span [ ariaHidden "true" ] []
-                      , span [ ariaHidden "true" ] []
-                      ]
-                  ]
-            , div [ class ("navbar-menu" ++ isActive) ]
-                  [ div [ class "navbar-end" ]
-                        [ div [ class "navbar-item" ]
-                            (if showNewButton then
-                                [ div [ class "buttons" ]
-                                    [ a [ href "/rezepte/neu", class "button" ] [ text "Neu" ]
-                                    ]
-                                ]
-                            else
-                                [])
-                        ]
+                  , div [ class "buttons" ]
+                        (if showNewButton then
+                            [ a [ href "/rezepte/neu", class "button" ] [ text "Neu" ] ]
+                        else
+                            [])
                   ]
             ]
 

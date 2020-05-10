@@ -10,11 +10,3 @@ role name =
 ariaLabel : String -> Attribute msg
 ariaLabel name =
     attribute "aria-label" name
-
-ariaHidden : String -> Attribute msg
-ariaHidden name =
-    attribute "aria-hidden" name
-
-ariaExpanded : String -> Attribute msg
-ariaExpanded name =
-    attribute "aria-expanded" name
