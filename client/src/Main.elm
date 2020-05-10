@@ -154,18 +154,16 @@ type Msg
     | SubmitRezeptNeuDone RezeptDetails (Result Http.Error String)
     | CancelRezeptNeu
 
-addRezeptTeil : Model -> ( Model, Cmd Msg )
+addRezeptTeil : Model -> Model
 addRezeptTeil model =
     case model.currentRoute of
         AddNew (AddNewEntering details) ->
             let
                 neu = (List.append details.rezept_teile [ neuerRezeptTeil ])
             in
-                ( { model | currentRoute = AddNew (AddNewEntering {details | rezept_teile = neu}) }
-                , Cmd.none
-                )
+                { model | currentRoute = AddNew (AddNewEntering {details | rezept_teile = neu}) }
         _ ->
-            (model, Cmd.none)
+            model
 
 replaceTeil : RezeptDetails -> Int -> (RezeptTeil -> RezeptTeil) -> RezeptDetails
 replaceTeil details idx fct =
@@ -176,18 +174,16 @@ replaceTeil details idx fct =
     in
         {details | rezept_teile = neu}
 
-inputTeilBezeichnung : Model -> Int -> String -> ( Model, Cmd Msg )
+inputTeilBezeichnung : Model -> Int -> String -> Model
 inputTeilBezeichnung model teilIdx s =
     case model.currentRoute of
         AddNew (AddNewEntering details) ->
             let
                 neu = replaceTeil details teilIdx (\t -> { t | bezeichnung = s })
             in
-                ( { model | currentRoute = AddNew (AddNewEntering neu) }
-                , Cmd.none
-                )
+                { model | currentRoute = AddNew (AddNewEntering neu) }
         _ ->
-            (model, Cmd.none)
+            model
 
 replaceZutat : RezeptTeil -> Int -> (RezeptZutat -> RezeptZutat) -> RezeptTeil
 replaceZutat teil idx fct =
@@ -201,18 +197,16 @@ replaceZutat teil idx fct =
     in
         {teil | zutaten = neu}
 
-inputZutat : Model -> Int -> Int -> (RezeptZutat -> RezeptZutat) -> ( Model, Cmd Msg )
+inputZutat : Model -> Int -> Int -> (RezeptZutat -> RezeptZutat) -> Model
 inputZutat model teilIdx zutatIdx fct =
     case model.currentRoute of
         AddNew (AddNewEntering details) ->
             let
                 neu = replaceTeil details teilIdx (\t -> replaceZutat t zutatIdx fct)
             in
-                ( { model | currentRoute = AddNew (AddNewEntering neu) }
-                , Cmd.none
-                )
+                { model | currentRoute = AddNew (AddNewEntering neu) }
         _ ->
-            (model, Cmd.none)
+            model
 
 formatError : Http.Error -> String
 formatError error =
@@ -265,24 +259,24 @@ update msg model =
                     (model, Cmd.none)
 
         AddRezeptTeil ->
-            addRezeptTeil model
+            (addRezeptTeil model, Cmd.none)
 
         InputTeilBezeichnung teilIdx s ->
-            inputTeilBezeichnung model teilIdx s
+            (inputTeilBezeichnung model teilIdx s, Cmd.none)
 
         InputZutat teilIdx zutatIdx s ->
-            inputZutat model teilIdx zutatIdx (\z -> { z | zutat = s })
+            (inputZutat model teilIdx zutatIdx (\z -> { z | zutat = s }), Cmd.none)
 
         InputMengeneinheit teilIdx zutatIdx s ->
-            inputZutat model teilIdx zutatIdx (\z -> { z | mengeneinheit = s })
+            (inputZutat model teilIdx zutatIdx (\z -> { z | mengeneinheit = s }), Cmd.none)
 
         InputBemerkung teilIdx zutatIdx s ->
-            inputZutat model teilIdx zutatIdx (\z -> { z | bemerkung = s })
+            (inputZutat model teilIdx zutatIdx (\z -> { z | bemerkung = s }), Cmd.none)
 
         InputMenge teilIdx zutatIdx s ->
             case (String.toFloat s) of
                 Just f ->
-                    inputZutat model teilIdx zutatIdx (\z -> { z | menge = f })
+                    (inputZutat model teilIdx zutatIdx (\z -> { z | menge = f }), Cmd.none)
                 Nothing ->
                     (model, Cmd.none)
 
