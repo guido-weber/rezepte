@@ -359,14 +359,6 @@ view model =
                 ]
             }
 
-onClickSimply : Msg -> Attribute Msg
-onClickSimply msg =
-    custom "click" (JD.map alwaysStopAndPreventDefault (JD.succeed msg))
-
-alwaysStopAndPreventDefault : Msg -> { message : Msg, stopPropagation : Bool, preventDefault : Bool }
-alwaysStopAndPreventDefault msg =
-      { message = msg, stopPropagation = True, preventDefault = True }
-
 viewNavbar : Model -> Html Msg
 viewNavbar model =
     let
