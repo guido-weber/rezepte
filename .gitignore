@@ -6,3 +6,5 @@ repl-temp-*
 .DS_Store
 assets/main.js
 rezepte_server/rezepte_server
+
+/commands.txt
