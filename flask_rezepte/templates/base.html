@@ -1,18 +1,24 @@
 <!doctype html>
-<title>Rezepte - {% block title %}{% endblock %}</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-<nav>
-    <h1>Rezepte</h1>
-    <ul>
-        <li><a href="bla">Bla</a>
-    </ul>
-</nav>
-<section class="content">
-    <header>
-        {% block header %}{% endblock %}
-    </header>
-    {% for message in get_flashed_messages() %}
-        <div class="flash">{{ message }}</div>
-    {% endfor %}
-    {% block content %}{% endblock %}
-</section>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rezepte - {% block title %}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <nav>
+        <h1><a href="{{ url_for('index') }}">Rezepte</a></h1>
+        <ul>
+            <li><a href="bla">Bla</a>
+        </ul>
+    </nav>
+    <section class="content">
+        <header>
+            {% block header %}{% endblock %}
+        </header>
+        {% for message in get_flashed_messages() %}
+            <div class="flash">{{ message }}</div>
+        {% endfor %}
+        {% block content %}{% endblock %}
+    </section>
+</body>

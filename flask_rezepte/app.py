@@ -5,12 +5,12 @@ def create_app():
     app = Flask(__name__)
 
     @app.route("/")
+    @app.route("/rezepte/")
     def index():
         return render_template('index.html', rezepte=db.rezept_liste())
 
-    @app.route('/hello/')
-    @app.route('/hello/<name>')
-    def hello(name=None):
-        return render_template('hello.html', name=name)
+    @app.route('/rezepte/<int:rezept_id>')
+    def rezept_details(rezept_id):
+        return render_template('rezept_details.html', rezept=db.rezept_details(rezept_id))
 
     return app

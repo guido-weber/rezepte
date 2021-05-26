@@ -8,7 +8,16 @@
 <table>
 {% for rezept in rezepte %}
     <tr>
-        <td>{{ rezept.bezeichnung }}</td>
+        <td>
+            <a href="{{ url_for('rezept_details', rezept_id=rezept.rezept_id) }}">
+                {{ rezept.bezeichnung }}
+            </a>
+        </td>
+        <td>
+            {% for tag in rezept.tags %}
+                <span class="tag">{{ tag.tag }}</span>
+            {% endfor %}
+        </td>
     </tr>
 {% endfor %}
 </table>

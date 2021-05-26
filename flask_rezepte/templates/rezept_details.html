@@ -1,0 +1,18 @@
+{% extends 'base.html' %}
+
+{% block header %}
+<h1>{% block title %}{{ rezept.bezeichnung }}{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+    {{ rezept.anleitung }}
+    {% for teil in rezept.teile %}
+        <h2>{{ teil.bezeichnung }}</h2>
+        <ul>
+        {% for zutat in teil.zutaten %}
+            <li>{{ "%G" % zutat.menge }} {{ zutat.mengeneinheit }} {{ zutat.zutat }}</li>
+        {% endfor %}
+        </ul>
+    {% endfor %}
+    <h2></h2>
+{% endblock %}

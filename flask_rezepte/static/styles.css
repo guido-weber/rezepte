@@ -1,13 +1,10 @@
-html {
-    font-family: sans-serif;
-    background: #eee;
-    padding: 1rem;
-}
-
 body {
-    max-width: 960px;
     margin: 0 auto;
     background: white;
+}
+
+html {
+    font-family: sans-serif;
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -131,4 +128,11 @@ input.danger {
 input[type=submit] {
     align-self: start;
     min-width: 10em;
+}
+
+span.tag {
+    padding: 0.1em 0.25em;
+    border-radius: 3px;
+    color: white;
+    background-color: #00d1b2;
 }
