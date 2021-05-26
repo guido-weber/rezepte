@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block header %}
+<h1>{% block title %}Liste{% endblock %}</h1>
+{% endblock %}
+
+{% block content %}
+<table>
+{% for rezept in rezepte %}
+    <tr>
+        <td>{{ rezept.bezeichnung }}</td>
+    </tr>
+{% endfor %}
+</table>
+{% endblock %}

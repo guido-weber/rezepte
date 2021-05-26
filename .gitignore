@@ -3,6 +3,10 @@ elm-stuff
 # elm-repl generated files
 repl-temp-*
 
+# Python
+/.venv
+__pycache__
+
 .DS_Store
 assets/main.js
 rezepte_server/rezepte_server
